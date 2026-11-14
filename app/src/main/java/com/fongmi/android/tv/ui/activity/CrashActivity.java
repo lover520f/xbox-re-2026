@@ -9,6 +9,7 @@ import androidx.viewbinding.ViewBinding;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.databinding.ActivityCrashBinding;
 import com.fongmi.android.tv.ui.base.BaseActivity;
+import com.fongmi.android.tv.utils.Util;
 import com.github.catvod.utils.Prefers;
 
 import java.util.Objects;
@@ -55,10 +56,12 @@ public class CrashActivity extends BaseActivity {
     }
 
     private void showError() {
+        String details = CustomActivityOnCrash.getAllErrorDetailsFromIntent(this, getIntent());
         new AlertDialog.Builder(this)
                 .setTitle(R.string.crash_details_title)
-                .setMessage(CustomActivityOnCrash.getAllErrorDetailsFromIntent(this, getIntent()))
+                .setMessage(details)
                 .setPositiveButton(R.string.crash_details_close, null)
+                .setNegativeButton(R.string.crash_details_copy, (dialog, which) -> Util.copy(details))
                 .show();
     }
 }
