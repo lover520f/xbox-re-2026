@@ -591,7 +591,11 @@
       return true;
     }
     if (sv.indexOf('hiker://') === 0) {
-      if (sv === 'hiker://empty' || sv.indexOf('hiker://empty#') === 0) return false;
+      /* hiker://empty 的语义是「**留在原页**」：规则要么自己 refreshPage 了，
+       * 要么这一下本来就不该动界面。它**不是**「没处理」——返回 false 会让
+       * 调用方兜底去跑首页规则，于是点一下线路/排序，详情页就被首页顶掉了
+       * （影探4K 点线路后报「缺少影片参数」就是这条）。 */
+      if (sv === 'hiker://empty' || sv.indexOf('hiker://empty#') === 0) return true;
       navigate(sv);
       return true;
     }
@@ -742,7 +746,15 @@
         if (!r.ok) { toast('执行失败：' + r.err); log(r.err); return; }
         var back = r.value;
         var items = HK.OUT.hasResult ? normalizeResult(HK.OUT.result) : null;
-        if (items && items.length) { STATE.stack.push({ title: it.title, items: items, url: HK.page.url }); renderItems(items, it.title); return; }
+        if (items && items.length) {
+          STATE.stack.push({ title: it.title, items: items, url: HK.page.url });
+          renderItems(items, it.title);
+          /* 这一页是**这条内联规则**画出来的（影探4K 的详情就是这样出来的）。
+           * 规则内部调 refreshPage() 时，该重跑的是它自己；之前这里没记住来源，
+           * 切线路时重跑的是首页规则，参数字段对不上，于是报「缺少影片参数」。 */
+          STATE.lastRun = { lazy: code, title: it.title };
+          return;
+        }
         if (dispatchReturned(back, it.title)) return;
         /* 没有结果、也没给出可执行返回 → 按刷新当前页处理 */
         refreshCurrent();
@@ -896,13 +908,28 @@
       else if (name === 'hk.log') log(str(payload));
       else if (name === 'hk.copy') { try { navigator.clipboard.writeText(str(payload)); } catch (e) {} toast('已复制'); }
       else if (name === 'hk.refresh') {
-        /* 规则里 refreshPage() 的语义就是「重跑当前页规则」（分页按钮、分类按钮都靠它） */
+        /* 规则里 refreshPage() 的语义就是「重跑当前页」，分页/分类/线路切换都靠它。
+         * 关键：当前页如果是内联规则画出来的（详情页常见），就要重跑那条内联规则
+         * 并**原地重渲染**，而不是去跑 runPage —— 跑 runPage 会多压一层页面栈，
+         * 而且首页规则根本不知道详情在讲哪一部片。 */
         if (STATE.lastRun && !STATE.refreshing) {
           STATE.refreshing = true;
           setTimeout(function () {
             var lr = STATE.lastRun;
             STATE.refreshing = false;
-            if (lr) runPage(lr.code, lr.vars, lr.title);
+            if (!lr) return;
+            if (lr.lazy) {
+              try {
+                HK.resetOut();
+                var rr = HK.runInline(lr.lazy, { input: '', MY_URL: HK.page.url, MY_PARAMS: CUR_PARAMS || {} });
+                var its = (rr.ok && HK.OUT.hasResult) ? normalizeResult(HK.OUT.result) : null;
+                if (its && its.length) { renderItems(its, lr.title); return; }
+                if (!rr.ok) log('重跑失败：' + rr.err);
+              } catch (e) {
+                log('重跑出错：' + (e && e.message));
+              }
+            }
+            if (lr.code) runPage(lr.code, lr.vars, lr.title);
           }, 16);
         }
       }

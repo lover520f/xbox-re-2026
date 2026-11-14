@@ -309,8 +309,16 @@
     }
     /* #fypage.js:<code> —— 合集框架的核心形态：执行 code 得到真实 URL。
      * ；； 还原后，code 与后面的 ;GET;UTF-8;{} 用分号分隔，
-     * 所以取到第一个分号为止（代码里若出现分号一定是被转义过的）。 */
-    var jm = /(?:^|#)fypage\.js:([\s\S]*)$/.exec(u) || /(?:^|#)[^#]*?\.js:([\s\S]*)$/.exec(u);
+     * 所以取到第一个分号为止（代码里若出现分号一定是被转义过的）。
+     *
+     * 注意顺序：必须先排除 @lazyRule= / @rule= 这两种。
+     * 它们的写法是 `hiker://empty#…##@lazyRule=.js:(function(v){…})("x")`，
+     * 第二个正则 `[^#]*?\.js:` 同样能命中，于是整个 lazyRule 被当成「内联 JS 页」，
+     * 结果是**不带参数**地执行函数体 —— 选集拿到空地址、线路拿到空 id，
+     * 所有 $().lazyRule() 生成的按钮（选线路/选集/排序/分类）点了全都没反应。 */
+    var isLazyForm = /(?:^|#)@?(?:lazyRule|rule)=/.test(u);
+    var jm = isLazyForm ? null
+      : (/(?:^|#)fypage\.js:([\s\S]*)$/.exec(u) || /(?:^|#)[^#]*?\.js:([\s\S]*)$/.exec(u));
     if (jm) {
       var tail = jm[1];
       var semi = tail.indexOf(';');
