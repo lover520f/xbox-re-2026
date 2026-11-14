@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔颜色：自星辰 values 按条目并入（transplant-set §3.2）+ 雾蓝灰基色 -->
+<resources>
+    <color name="black_secondary">#ff222222</color>
+    <color name="green">#ff14c47c</color>
+    <color name="half_transparent2">#60000000</color>
+    <color name="little_green">#f0e6f3e6</color>
+    <color name="progress_blue">#ff62a6fb</color>
+    <color name="red_shallow">#fffe7577</color>
+    <color name="tabText">#99999999</color>
+    <color name="text_color_tertiary">#ff757575</color>
+    <color name="whiteblack2">#60333333</color>
+    <color name="yellowAction">#ff109d58</color>
+    <color name="little_yellow">#f0e6f3e6</color>
+    <color name="black_666">#ff222222</color>
+    <color name="dark_edit">#ff333333</color>
+    <color name="blackText">#ff222222</color>
+    <color name="blackText3">#ff444444</color>
+    <color name="black_77">#773e3e40</color>
+    <color name="black_third">#ff333333</color>
+    <color name="colorAccent">#ff109d58</color>
+    <color name="gray_rice">#fff5f5f5</color>
+    <color name="gray_rice_deep">#fff2f2f2</color>
+    <color name="gray_text">#ff848484</color>
+    <color name="greenAction">#ff109d58</color>
+    <color name="grey_black">#ffdfdfdf</color>
+    <color name="icon_color1">#ffb7acf8</color>
+    <color name="icon_color2">#ff717171</color>
+    <color name="icon_color3">#ff62a6fb</color>
+    <color name="icon_color4">#fff48fb1</color>
+    <color name="icon_color5">#fff7a97b</color>
+    <color name="icon_color6">#ff00bcd4</color>
+    <color name="icon_color7">#ff8bc34a</color>
+    <color name="icon_color8">#ff99a5cd</color>
+    <color name="line_border">#60999999</color>
+    <color name="redAction">#ffed424b</color>
+    <color name="tabText2">#ff888888</color>
+    <color name="whiteblack">#99999999</color>
+    <!-- liam 雾蓝灰板：海阔主题基色（hk 专用） -->
+    <color name="hk_primary">#2C4A73</color>
+    <color name="hk_primary_dark">#16283F</color>
+    <color name="hk_accent">#7FA6C9</color>
+    <color name="hk_surface_light">#D9E4EC</color>
+    <color name="hk_gold">#E8B04B</color>
+    <color name="hk_status_bar">#FFF4F6F8</color>
+</resources>

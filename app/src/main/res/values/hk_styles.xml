@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔样式：自星辰按条目/摘块并入；Theme.XingChen.HkPage 父主题改挂 Theme.App -->
+<resources>
+    <style name="MyToolTipOverlayDefaultStyle" parent="@style/ToolTipOverlayDefaultStyle">
+            <item name="android:color">@color/greenAction</item>
+        </style>
+    <style name="MyTooltip" parent="@style/ToolTipLayoutDefaultStyle">
+            <item name="ttlm_backgroundColor">@color/greenAction</item>
+            <item name="ttlm_overlayStyle">@style/MyToolTipOverlayDefaultStyle</item>
+        </style>
+    <style name="HkDialogFade">
+            <item name="android:windowEnterAnimation">@anim/hk_dialog_fade_in</item>
+            <item name="android:windowExitAnimation">@anim/hk_dialog_fade_out</item>
+        </style>
+    <style name="XcPopupFade">
+            <item name="android:windowEnterAnimation">@anim/hk_dialog_fade_in</item>
+            <item name="android:windowExitAnimation">@anim/hk_dialog_fade_out</item>
+        </style>
+    <style name="Theme.XingChen.HkPage" parent="Theme.App">
+            <item name="android:alertDialogTheme">@style/ThemeOverlay.XingChen.GlassDialog.Dark</item>
+            <!-- 液态玻璃：起始窗口用与动态背景场景同值的渐变（bg_hk_window_gradient，顶色仍是
+                 hk_status_bar，透明状态栏下不断带）；运行时窗底仍由 ThemeManager 落 hk_status_bar 平色 -->
+            <item name="android:windowBackground">@drawable/bg_hk_window_gradient</item>
+            <item name="android:windowLightStatusBar">true</item>
+        </style>
+    <style name="XingChen.DialogEditText.Dark" parent="android:Widget.EditText">
+            <item name="android:background">@drawable/bg_input_dark</item>
+            <item name="android:textColor">#F2F4F8</item>
+            <item name="android:textColorHint">#6E7686</item>
+            <item name="android:padding">12dp</item>
+        </style>
+    <style name="XingChen.DialogEditText.HkLight" parent="android:Widget.EditText">
+            <item name="android:background">@drawable/bg_input_light</item>
+            <item name="android:textColor">#101216</item>
+            <item name="android:textColorHint">#3A3F45</item>
+            <item name="android:padding">12dp</item>
+        </style>
+    <style name="ThemeOverlay.XingChen.GlassDialog.Dark" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+            <item name="dialogCornerRadius">16dp</item>
+            <item name="background">@drawable/dialog_glass_dark</item>
+            <!-- 注意：不许加 android:background——它会级联成弹窗内每个子 view（标题区/内容区/按钮区）的默认背景，
+                 导致三层圆角框错位叠加（1.3.47 搜书弹窗渲染坏的根因）。卡片背景只走 background＋windowBackground。 -->
+            <item name="android:windowBackground">@drawable/dialog_glass_dark</item>
+            <item name="android:textColor">#F2F4F8</item>
+            <item name="android:textColorPrimary">#F2F4F8</item>
+            <item name="android:textColorSecondary">#A8B0C0</item>
+            <!-- MaterialAlertDialog 的标题/正文走 ?attr/colorOnSurface（不是 android:textColor），
+                 不声明会继承 Activity 基主题的深色值，深底上正文隐形（1.3.49 导入结果框 bug） -->
+            <item name="colorOnSurface">#F2F4F8</item>
+            <item name="android:textColorAlertDialogListItem">#F2F4F8</item>
+            <item name="textColorAlertDialogListItem">#F2F4F8</item>
+            <item name="android:colorAccent">#D9A420</item>
+            <item name="android:editTextStyle">@style/XingChen.DialogEditText.Dark</item>
+        </style>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔字符串：自星辰 hk_hiker.xml 按条目并入 -->
+<resources>
+    <string name="hk_code">&lt;/></string>
+    <string name="version_check_url">http://gh.haikuoshijie.cn/https://github.com/qiusunshine/hiker-rules/blob/master/versions.json</string>
+    <string name="version_check_url2">https://ghproxy.com/https://raw.githubusercontent.com/qiusunshine/hiker-rules/master/versions.json</string>
+</resources>
