@@ -86,7 +86,7 @@ import org.mozilla.javascript.commonjs.module.provider.UrlModuleSourceProvider;
  *
  * 注意：lazyRule 回调按"独立作用域"铁律设计——HikerApi 只注入全局函数与形参，不依赖 JS 闭包。
  */
-public class HkJsRuntime implements HkSelector.JsEvaluator, Parser.JsEvaluator {
+public class HkJsRuntime implements HkSelector.JsEvaluator {
 
     private static final String TAG = "HkJsRuntime";
     // 聚阅借名垫片用的路径常量（原文 SrcJuMethod.js:2-8，ea2ea7f49c1d87b8d19784fa4206921f.js）。
@@ -3224,7 +3224,8 @@ public class HkJsRuntime implements HkSelector.JsEvaluator, Parser.JsEvaluator {
         this.rule = rule;
         this.executor = Executors.newSingleThreadExecutor();
         this.parser = new Parser();
-        this.parser.setJsEvaluator(this);
+        // oktv 宿主 Parser 无 setJsEvaluator/JsEvaluator（盘点定：保留宿主 Parser）；
+        // .js: 值加工走 HkSelector 层（newSelector 已注入本实例为其 JsEvaluator）。
         this.results = new ArrayList<>();
         this.kv = new HashMap<>();
         loadPublicKv();
@@ -9324,7 +9325,7 @@ public class HkJsRuntime implements HkSelector.JsEvaluator, Parser.JsEvaluator {
     }
 
     /**
-     * HkSelector.JsEvaluator / Parser.JsEvaluator 实现：选择器 .js: 值加工。
+     * HkSelector.JsEvaluator 实现：选择器 .js: 值加工。
      * 把取值结果作为全局 input，执行 JS 片段并返回结果字符串。
      * 已在 JS 线程时（如 pdfh/pdfa 的 .js: 回调）直接求值，避免单线程池死锁。
      */

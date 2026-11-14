@@ -36,7 +36,6 @@ import java.util.Set;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Environment;
-import androidx.appcompat.widget.AppCompatResources;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import com.fongmi.android.tv.api.hk.HkJsRuntime;
@@ -586,111 +585,4 @@ public class ImgUtil {
         view.setImageDrawable(getEmptyCoverDrawable(text, firstCharOnly, cornerRadiiPx));
     }
 
-    private static Drawable getTextDrawable(String text, boolean vod) {
-        // 有地址专用透明占位：加载中（placeholder）与加载失败（onLoadFailed）都保持透明，
-        // 不显示任何占位图，等图片加载完成直接显示。判空分支不走这里，走素图。
-        android.graphics.drawable.ColorDrawable drawable = new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT);
-        return drawable;
-    }
-
-    private static RequestListener<Drawable> getListener(String text, String url, ImageView view, boolean vod) {
-        return new RequestListener<>() {
-            @Override
-            public boolean onLoadFailed(@Nullable GlideException e, Object model, @NonNull Target<Drawable> target, boolean isFirstResource) {
-                view.setImageDrawable(getTextDrawable(text, vod));
-                return true;
-            }
-
-            @Override
-            public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource) {
-                if (resource != null) CoverRatioCache.put(url, resource.getIntrinsicWidth(), resource.getIntrinsicHeight());
-                return false;
-            }
-        };
-    }
-}
-
-    private static boolean hasHeaderKey(Map<String, String> headers, String key) {
-        if (headers == null || key == null) return false;
-        for (String k : headers.keySet()) {
-            if (k != null && k.equalsIgnoreCase(key)) return true;
-        }
-        return false;
-    }
-
-    private static String defaultUa() {
-        try {
-            String ua = Setting.getUa();
-            return ua == null ? "" : ua;
-        } catch (Throwable t) {
-            return "";
-        }
-    }
-
-    private static String getDom(String url) {
-        if (TextUtils.isEmpty(url)) return url;
-        try {
-            String u = getRealUrl(url);
-            // 8.83 getDom0：thunder/magnet/ftp/ed2k/file 直接返回原串，不取 host
-            if (u.startsWith("thunder://") || u.startsWith("magnet:") || u.startsWith("ftp://")
-                    || u.startsWith("ed2k:") || u.startsWith("file://")) {
-                return u;
-            }
-            String[] parts = u.split("://");
-            if (parts.length > 1) return parts[1].split("/")[0];
-            parts = u.split("//");
-            if (parts.length > 1) return parts[1].split("/")[0];
-            return u.replaceFirst("http://", "").replaceFirst("https://", "").replaceFirst("hiker://", "").split("/")[0];
-        } catch (Throwable t) {
-            return "";
-        }
-    }
-
-    private static String getRealUrl(String url) {
-        if (TextUtils.isEmpty(url)) return url;
-        try {
-            String u = url.split("@lazyRule=")[0].split("@rule=")[0];
-            if (u.startsWith("hiker://empty#http")) u = replaceOnce(u, "hiker://empty#", "");
-            else if (u.startsWith("webview://")) u = u.replaceFirst("webview://", "");
-            else if (u.startsWith("hiker://empty##http") || u.startsWith("hiker://empty##https%3A%2F%2F") || u.startsWith("hiker://empty##http%3A%2F%2F"))
-                u = replaceOnce(u, "hiker://empty##", "");
-            else if (u.startsWith("hiker://empty$http")) u = replaceOnce(u, "hiker://empty$", "");
-            else if (u.startsWith("hiker://empty$$http")) u = replaceOnce(u, "hiker://empty$$", "");
-            int d = u.indexOf("$$$");
-            if (d >= 0) u = u.substring(0, d);
-            return u;
-        } catch (Throwable t) {
-            return url;
-        }
-    }
-
-    private static String replaceOnce(String s, String from, String to) {
-        int i = s.indexOf(from);
-        return i < 0 ? s : s.substring(0, i) + to + s.substring(i + from.length());
-    }
-
-    private static Drawable getEmptyCoverDrawable(String text, boolean firstCharOnly, float cornerRadiusPx) {
-        return new CoverTextDrawable(text, firstCharOnly, cornerRadiusPx);
-    }
-
-    private static Drawable getEmptyCoverDrawable(String text, boolean firstCharOnly, float[] cornerRadiiPx) {
-        return new CoverTextDrawable(text, firstCharOnly, cornerRadiiPx);
-    }
-
-    private static void clearRequest(ImageView view) {
-        try {
-            Glide.with(view).clear(view);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void showEmptyCover(ImageView view, String text, boolean firstCharOnly, float cornerRadiusPx) {
-        clearRequest(view);
-        view.setImageDrawable(getEmptyCoverDrawable(text, firstCharOnly, cornerRadiusPx));
-    }
-
-    private static void showEmptyCover(ImageView view, String text, boolean firstCharOnly, float[] cornerRadiiPx) {
-        clearRequest(view);
-        view.setImageDrawable(getEmptyCoverDrawable(text, firstCharOnly, cornerRadiiPx));
-    }
 }
