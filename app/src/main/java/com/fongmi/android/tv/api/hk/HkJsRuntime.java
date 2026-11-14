@@ -5133,15 +5133,15 @@ public class HkJsRuntime implements HkSelector.JsEvaluator {
         putFunction("_pd", args -> {
             if (args == null || args.length < 2) return "";
             String urlKey = args.length > 2 ? argStr(args[2]) : "";
-            return parser.hpdh(argStr(args[0]), sel(args[1]), urlKey);
+            return parser.pdfh(argStr(args[0]), sel(args[1]), urlKey); // 宿主 Parser 无 hpdh：pdfh 同形替代（HtmlParser 口径差异一期接受）
         });
         putFunction("_pdfh", args -> {
             if (args == null || args.length < 2) return "";
-            return parser.hpdh(argStr(args[0]), sel(args[1]), "");
+            return parser.pdfh(argStr(args[0]), sel(args[1]), ""); // hpdh→pdfh 同形替代
         });
         putFunction("_pdfa", args -> {
             if (args == null || args.length < 2) return toJsArray(new ArrayList<>());
-            return toJsArray(parser.hpda(argStr(args[0]), sel(args[1])));
+            return toJsArray(parser.pdfa(argStr(args[0]), sel(args[1]))); // hpda→pdfa 同形替代
         });
         // _pdfl(html, listRule, htmlRule, texts, urls)：8.83（HtmlParser.smali:569）：
         // 每项 = parseDomForUrl(itemHtml, htmlRule, "").trim() + "$" + parseDomForUrl(itemHtml, texts, urls)，
@@ -5151,7 +5151,7 @@ public class HkJsRuntime implements HkSelector.JsEvaluator {
             String htmlRule = args.length > 2 ? argStr(args[2]) : "";
             String texts = args.length > 3 ? argStr(args[3]) : "";
             String urls = args.length > 4 ? argStr(args[4]) : "";
-            return toJsArray(parser.hpdfl(argStr(args[0]), sel(args[1]), htmlRule, texts, urls));
+            return toJsArray(hpdflViaHost(argStr(args[0]), sel(args[1]), htmlRule, texts, urls));
         });
         // _findItem(id)：8.83（JSEngine.java:1280）按 id 查当前条目列表（ItemFindEvent 机制），
         // 找到返回条目对象、找不到 null。星辰旧实现恒 ""。
@@ -10024,6 +10024,15 @@ public class HkJsRuntime implements HkSelector.JsEvaluator {
     /**
      * 给 HkSelector 配一个带 JS 求值能力的实例（M1 的 null 透传升级为真求值）。
      */
+    /** _pdfl 的宿主 Parser 组合实现（hpdfl 语义：每项 = pdfh(item, htmlRule, "").trim() + "$" + pdfh(item, texts, urls)）。 */
+    private java.util.List<String> hpdflViaHost(String html, String rule, String htmlRule, String texts, String urls) {
+        java.util.List<String> out = new ArrayList<>();
+        for (String item : parser.pdfa(html, rule)) {
+            out.add(parser.pdfh(item, htmlRule, "").trim() + "$" + parser.pdfh(item, texts, urls));
+        }
+        return out;
+    }
+
     public HkSelector newSelector() {
         HkSelector selector = new HkSelector();
         selector.setJsEvaluator(this);

@@ -16,6 +16,13 @@ import okhttp3.Response;
 
 public class Loader {
 
+    // 海阔增量（照星辰 Loader）：进程级预热实例，静态持有到进程结束
+    private static Loader startup;
+
+    public static synchronized void warmUp() {
+        if (startup == null) startup = new Loader();
+    }
+
     private final PyObject app;
 
     public Loader() {

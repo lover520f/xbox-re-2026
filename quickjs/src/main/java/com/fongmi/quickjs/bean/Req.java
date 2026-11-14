@@ -30,6 +30,11 @@ public class Req {
     private JsonElement data;
     @SerializedName("headers")
     private JsonElement headers;
+    // 海阔增量（照星辰 Req）：fetch 选项的 per-request dns 与 rejectCoding
+    @SerializedName("rejectCoding")
+    private Boolean rejectCoding;
+    @SerializedName("dns")
+    private String dns;
 
     public static Req objectFrom(String json) {
         return new Gson().fromJson(json, Req.class);
@@ -85,5 +90,33 @@ public class Req {
     private String getCharset(String value) {
         for (String text : value.split(";")) if (text.contains("charset=")) return text.split("=")[1];
         return "UTF-8";
+    }
+
+    // ---- 海阔增量（照星辰 Req 同名法）：HkHttp/HkJsRuntime 用 ----
+    public String getDns() {
+        return dns;
+    }
+
+    public boolean isRejectCoding() {
+        return rejectCoding != null && rejectCoding;
+    }
+
+    /** 请求头 content-type 里显式声明的 charset（charset=/charst=），未声明回 null。 */
+    public String getCharsetOrNull() {
+        Map<String, String> header = getHeader();
+        List<String> keys = Arrays.asList("content-type", "Content-Type", "Content-type");
+        for (String key : keys) {
+            String v = header.get(key);
+            if (v != null && !v.isEmpty()) return charsetRemainder(v);
+        }
+        return null;
+    }
+
+    private static String charsetRemainder(String value) {
+        int i = value.indexOf("charset=");
+        if (i >= 0) return value.substring(i + "charset=".length());
+        int j = value.indexOf("charst=");
+        if (j >= 0) return value.substring(j + "charst=".length());
+        return null;
     }
 }

@@ -43,6 +43,12 @@ public class OkDns implements Dns {
         map.clear();
     }
 
+    // 海阔增量（照星辰 OkDns）：仅清 DoH（系统 DNS 模式），不动静态 hosts 表
+    public synchronized void clearDoh() {
+        this.doh = null;
+        this.supplier = null;
+    }
+
     public void addAll(List<String> hosts) {
         map.putAll(hosts.stream().filter(Objects::nonNull).map(host -> host.split("=", 2)).filter(splits -> splits.length == 2).collect(Collectors.toMap(s -> s[0].trim(), s -> s[1].trim(), (oldHost, newHost) -> newHost)));
     }

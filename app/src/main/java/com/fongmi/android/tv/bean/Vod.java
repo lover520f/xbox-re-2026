@@ -151,6 +151,11 @@ public class Vod implements Parcelable, Diffable<Vod> {
         this.vodPic = vodPic;
     }
 
+    // 海阔增量（照星辰 Vod）：VideoActivity.startHk 组装 Vod 用
+    public void setRemarks(String vodRemarks) {
+        this.vodRemarks = vodRemarks;
+    }
+
     public String getRemarks() {
         return TextUtils.isEmpty(vodRemarks) ? "" : vodRemarks.trim();
     }
@@ -169,6 +174,10 @@ public class Vod implements Parcelable, Diffable<Vod> {
 
     public void setDirector(String vodDirector) {
         this.vodDirector = vodDirector;
+    }
+
+    public void setActor(String vodActor) {
+        this.vodActor = vodActor;
     }
 
     public String getActor() {

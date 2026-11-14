@@ -420,14 +420,8 @@ public class HkPageActivity extends BaseActivity {
             return;
         }
         if (!http && lower.endsWith(".epub")) {
-            try {
-                Intent it = new Intent(Intent.ACTION_VIEW, uri);
-                it.setClass(this, com.fongmi.android.tv.localbook.LocalBookOpenActivity.class);
-                it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivity(it);
-            } catch (Exception e) {
-                Notify.show("无法打开此文件");
-            }
+            // 一期口径：本地书阅读未移植（LocalEpub 为桩），不打开阅读器
+            Notify.show("阅读功能暂不可用");
             return;
         }
         openExternalBySuffix(uri, displayName);
@@ -4930,7 +4924,7 @@ public class HkPageActivity extends BaseActivity {
                         // 入口无图不许拦（fix4）：阅读器自带回退解析（会话图→章节串
                         // →router.play 重取→书源），入口一拦全灭——1.4.19 真机
                         // 「漫画详情页都进不去」的根。只强制留底，照常组会话进阅读器。
-                        com.github.catvod.crawler.SpiderDebug.forceLog("hk",
+                        com.github.catvod.crawler.SpiderDebug.log("hk",
                                 "pics empty at page entry (proceed) rule=%s pics=%d page=%s",
                                 currentRule == null ? "" : currentRule.getTitle(),
                                 urls.size(), hkPageUrl);
@@ -6228,9 +6222,9 @@ public class HkPageActivity extends BaseActivity {
                     String title = it != null && !TextUtils.isEmpty(it.getTitle()) ? stripHtml(it.getTitle()) : "下载";
                     java.util.Map<String, String> headers = new java.util.HashMap<>();
                     headers.put("User-Agent", com.fongmi.android.tv.player.PlayerHelper.getUa());
-                    com.fongmi.android.tv.utils.download.DownloadTask task =
-                            com.fongmi.android.tv.utils.download.DownloadManager.get().add(realUrl, title, headers);
-                    if (task != null) ToastUtil.show(this, "开始下载", android.widget.Toast.LENGTH_SHORT);
+                    // 宿主侧 DownloadManager 桩（改接 oktv Download，无 DownloadTask 返回）
+                    com.fongmi.android.tv.utils.download.DownloadManager.get().add(realUrl, title, headers);
+                    ToastUtil.show(this, "开始下载", android.widget.Toast.LENGTH_SHORT);
                 } catch (Throwable t) {
                     ToastUtil.show(this, "下载失败", android.widget.Toast.LENGTH_SHORT);
                 }

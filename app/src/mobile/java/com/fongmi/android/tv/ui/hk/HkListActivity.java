@@ -751,7 +751,7 @@ public class HkListActivity extends AppCompatActivity
                     // →router.play 重取→书源），入口一拦全灭——1.4.19 真机
                     // 「漫画详情页都进不去」的根。只强制留底，照常组会话进阅读器。
                     if (!com.fongmi.android.tv.api.hk.HkRouter.hasLoadablePic(request.pics)) {
-                        com.github.catvod.crawler.SpiderDebug.forceLog("hk",
+                        com.github.catvod.crawler.SpiderDebug.log("hk",
                                 "pics empty at openPictureList (proceed) pics=%d reqUrl=%s",
                                 request.pics == null ? 0 : request.pics.size(),
                                 request.url == null ? "" : request.url);
@@ -822,7 +822,7 @@ public class HkListActivity extends AppCompatActivity
                     if (prog != null && prog.position > 0) startPage = prog.position;
                     // 组会话打点闭环：出问题时凭这一行就能判 pics 是否为空、
                     // pageUrl 是否合格，不再靠下游零记录反推（漫小肆法医 §四缺口）。
-                    com.github.catvod.crawler.SpiderDebug.forceLog("hk",
+                    com.github.catvod.crawler.SpiderDebug.log("hk",
                             "openPictureList pics=%d firstHost=%s pageUrl=%s chapters=%d idx=%d",
                             s.images.size(),
                             s.images.isEmpty() ? "" : hostOf(s.images.get(0)),
@@ -830,7 +830,7 @@ public class HkListActivity extends AppCompatActivity
                     ReadingRouter.openReadingWithStartPage(activity, s, startPage);
                 } catch (Throwable t) {
                     // 不许再只写 Log.e（调试日志里永远看不到）：强制留底。
-                    com.github.catvod.crawler.SpiderDebug.forceLog("hk", t);
+                    com.github.catvod.crawler.SpiderDebug.log("hk", t);
                 }
             }
 

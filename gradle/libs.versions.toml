@@ -61,6 +61,9 @@ simpleXml = "2.7.1"
 smbj = "0.14.0"
 textdrawable = "1.0.3"
 zxingCore = "3.5.4"
+zxingAndroidEmbedded = "4.3.0"
+htmlcleaner = "2.29"
+junrar = "7.5.2"
 jgit = "6.10.0.202406032230-r"
 
 [libraries]
@@ -149,6 +152,9 @@ simple-xml = { group = "org.simpleframework", name = "simple-xml", version.ref =
 smbj = { group = "com.hierynomus", name = "smbj", version.ref = "smbj" }
 textdrawable = { group = "com.github.jahirfiquitiva", name = "TextDrawable", version.ref = "textdrawable" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
+zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
+htmlcleaner = { group = "net.sourceforge.htmlcleaner", name = "htmlcleaner", version.ref = "htmlcleaner" }
+junrar = { group = "com.github.junrar", name = "junrar", version.ref = "junrar" }
 jgit = { group = "org.eclipse.jgit", name = "org.eclipse.jgit", version.ref = "jgit" }
 
 [plugins]

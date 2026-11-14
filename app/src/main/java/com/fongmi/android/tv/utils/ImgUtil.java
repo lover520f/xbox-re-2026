@@ -37,6 +37,8 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Environment;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
+
+import org.json.JSONObject;
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
 import com.fongmi.android.tv.api.hk.HkJsRuntime;
 import com.fongmi.android.tv.setting.Setting;
@@ -46,6 +48,8 @@ import java.io.File;
 import jahirfiquitiva.libs.textdrawable.TextDrawable;
 
 public class ImgUtil {
+
+    private static final String TAG = "ImgUtil";
 
     private static final Set<String> failed = Collections.synchronizedSet(new HashSet<>());
 
@@ -121,6 +125,41 @@ public class ImgUtil {
             else builder.fitCenter().into(view);
         } catch (Throwable e) {
             e.printStackTrace();
+        }
+    }
+
+    // ---- 海阔增量（照星辰 ImgUtil 摘段）：带 ruleUrl 的 load 重载组 ----
+    public static void load(String text, String url, ImageView view, String ruleUrl) {
+        load(text, url, view, true, 0, 0, ruleUrl);
+    }
+
+    public static void load(String text, String url, ImageView view, boolean vod, int width, int height, String ruleUrl) {
+        load(text, url, view, vod, width, height, ruleUrl, null);
+    }
+
+    public static void loadFade(String text, String url, ImageView view) {
+        load(text, url, view, true, 0, 0, null, null, true);
+    }
+
+    public static void load(String text, String url, ImageView view, boolean vod, int width, int height, String ruleUrl, java.util.Map<String, String> fillHeaders) {
+        load(text, url, view, vod, width, height, ruleUrl, fillHeaders, false);
+    }
+
+    private static void load(String text, String url, ImageView view, boolean vod, int width, int height, String ruleUrl, java.util.Map<String, String> fillHeaders, boolean fade) {
+        view.setScaleType(vod ? android.widget.ImageView.ScaleType.CENTER_CROP : android.widget.ImageView.ScaleType.FIT_CENTER);
+        if (!vod) view.setVisibility(TextUtils.isEmpty(url) ? View.GONE : View.VISIBLE);
+        if (TextUtils.isEmpty(url)) showEmptyCover(view, text, false, 0);
+        else try {
+            com.bumptech.glide.RequestBuilder<Drawable> builder = Glide.with(view).load(getUrl(url, ruleUrl, fillHeaders)).listener(getListener(text, url, view, vod));
+            if (width > 0 && height > 0) builder.override(width, height);
+            if (fade) builder.transition(DrawableTransitionOptions.withCrossFade(200));
+            builder.placeholder(getTextDrawable(text, vod));
+            if (ruleUrl != null) builder.diskCacheStrategy(DiskCacheStrategy.ALL);
+            if (vod) builder.centerCrop().into(view);
+            else builder.fitCenter().into(view);
+        } catch (Throwable e) {
+            Logger.t(TAG).e(e, "load build failed url=%s", url);
+            view.setImageDrawable(getTextDrawable(text, vod));
         }
     }
 

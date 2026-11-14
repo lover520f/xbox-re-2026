@@ -110,7 +110,7 @@ public class SettingEnhanceFragment extends BaseFragment {
             else Notify.show(R.string.setting_custom_csp_permission_required);
         }));
         mBinding.lab.setOnClickListener(view -> LabActivity.start(requireContext()));
-        mBinding.hiker.setOnClickListener(view -> HkPageActivity.start(requireContext()));
+        mBinding.hiker.setOnClickListener(view -> HkPageActivity.start(requireActivity()));
         mBinding.hikerNav.setOnClickListener(view -> {
             HkConfig.get().setNavEntry(!HkConfig.get().getNavEntry());
             setText();

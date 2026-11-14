@@ -202,13 +202,13 @@ public final class HkRouteBlocker {
 
             @Override
             public void openFileBrowser(Activity activity, String path) {
-                FileActivity.start(activity, path);
+                activity.startActivity(new Intent(activity, FileActivity.class)); // 宿主 FileActivity 无 start(path)：显式 Intent 打开（不带路径）
             }
 
             @Override
             public void openLocalMedia(Activity activity) {
                 // 8.83 本地媒体页；星辰以文件浏览页承接
-                FileActivity.start(activity, null);
+                activity.startActivity(new Intent(activity, FileActivity.class)); // 同上
             }
 
             @Override

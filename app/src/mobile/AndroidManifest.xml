@@ -159,6 +159,11 @@
             android:theme="@style/Theme.XingChen.HkPage"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:screenOrientation="fullUser" />
+        <activity
+            android:name=".ui.activity.ScanActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
 
         <activity
             android:name=".ui.hk.HkSearchActivity"
