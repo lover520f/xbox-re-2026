@@ -21,6 +21,7 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.config.LiveConfig;
 import com.fongmi.android.tv.lab.LabActivity;
 import com.fongmi.android.tv.lab.LabConfig;
+import com.fongmi.android.tv.api.hk.HkConfig;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.api.config.WallConfig;
 import com.fongmi.android.tv.bean.Config;
@@ -112,6 +113,7 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
         // 与 webhtv main 同口径：实验室设置里改了「底部导航入口」开关后，
         // 回到首页按当前配置重算可见性（本分支无 FollowingSettings，故只判 lab）。
         if (mBinding.navigation.getMenu().findItem(R.id.lab).isVisible() != LabConfig.get().getNavEntry()) setNavigation();
+        if (mBinding.navigation.getMenu().findItem(R.id.hiker).isVisible() != HkConfig.get().getNavEntry()) setNavigation();
     }
 
     @Override
@@ -207,6 +209,8 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
         mBinding.navigation.getMenu().findItem(R.id.live).setVisible(LiveConfig.hasUrl());
         // 实验室底部入口由实验室设置里的「底部导航入口」开关控制；关时只从增强设置进入。
         mBinding.navigation.getMenu().findItem(R.id.lab).setVisible(LabConfig.get().getNavEntry());
+        // 海阔底部入口由 HkConfig 的「底部导航入口」开关控制，默认关；关时只从增强设置进入。
+        mBinding.navigation.getMenu().findItem(R.id.hiker).setVisible(HkConfig.get().getNavEntry());
         syncNavigationSelection();
     }
 
@@ -278,6 +282,7 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
         if (item.getItemId() == R.id.vod) return changeFragment(0);
         if (item.getItemId() == R.id.live) return openLive();
         if (item.getItemId() == R.id.lab) { LabActivity.start(this); return false; }
+        if (item.getItemId() == R.id.hiker) { HkPageActivity.start(this); return false; }
         return false;
     }
 

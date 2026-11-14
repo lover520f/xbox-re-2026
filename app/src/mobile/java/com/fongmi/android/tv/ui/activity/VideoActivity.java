@@ -72,6 +72,7 @@ import com.fongmi.android.tv.Constant;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.DanmakuApi;
 import com.fongmi.android.tv.api.SiteApi;
+import com.fongmi.android.tv.api.hk.HkDetailBridge;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.bean.CastVideo;
 import com.fongmi.android.tv.bean.Danmaku;
@@ -293,6 +294,93 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
 
     public static void cast(Activity activity, History history) {
         start(activity, history.getSiteKey(), history.getVodId(), history.getVodName(), history.getVodPic(), null, history.getWallPic());
+    }
+
+    // ===== 海阔接线（自星辰 VideoActivity 摘录改接） =====
+    private static final java.util.concurrent.atomic.AtomicInteger HK_EPISODES_SEQ = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.Map<String, String> HK_EPISODES_PARK = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void parkHkEpisodes(String ref, String episodesJson) {
+        if (ref != null && episodesJson != null) HK_EPISODES_PARK.put(ref, episodesJson);
+    }
+
+    private static String unparkHkEpisodes(String ref) {
+        return ref == null ? "" : Objects.toString(HK_EPISODES_PARK.remove(ref), "");
+    }
+
+    /**
+     * 海阔分支入口：单页点条目打开详情页。
+     * extras: hk_rule=规则名, hk_item_url=条目URL；key 命名空间为 hk_<规则名>。
+     */
+    public static void startHk(Activity activity, String ruleTitle, String itemUrl, String name, String pic) {
+        Intent intent = new Intent(activity, VideoActivity.class);
+        intent.putExtra("key", HkDetailBridge.siteKey(ruleTitle));
+        intent.putExtra("id", itemUrl);
+        intent.putExtra("name", name);
+        intent.putExtra("pic", pic);
+        intent.putExtra("hk_rule", ruleTitle);
+        intent.putExtra("hk_item_url", itemUrl);
+        activity.startActivity(intent);
+    }
+
+    /**
+     * 海阔 V4 直接播放：跳过详情页，选集直达播放器。
+     * 解析走 SiteApi.playerContent 的 hk_ 拦截（HkRouter.play），
+     * 播放经 oktv 既有漏斗 Result(header) → PlaySpec.from(result)，不走 push_agent 裸 URL。
+     */
+    public static void startHkPlay(Activity activity, String ruleTitle, String lineName, String episodeUrl, String episodeName, String name, String pic) {
+        startHkPlay(activity, ruleTitle, lineName, episodeUrl, episodeName, name, pic, "", 0);
+    }
+
+    public static void startHkPlay(Activity activity, String ruleTitle, String lineName, String episodeUrl, String episodeName, String name, String pic, String episodesJson, int selIdx) {
+        startHkPlay(activity, ruleTitle, lineName, episodeUrl, episodeName, name, pic, episodesJson, selIdx, "", "", "", "");
+    }
+
+    public static void startHkPlay(Activity activity, String ruleTitle, String lineName, String episodeUrl, String episodeName, String name, String pic, String episodesJson, int selIdx, String content, String actor, String director, String remarks) {
+        // 电台先于音乐问（识别表里「电台」同在音乐关键词内，顺序反了电台永远进不了听书）
+        if (com.fongmi.android.tv.ui.HkRadioRouter.routeHk(activity, ruleTitle, lineName, episodeUrl, episodeName, name, pic, episodesJson, selIdx)) return;
+        // 投屏服务播放态登记（HkDlanState；失败只影响投屏端点读态，不牵连起播）
+        try {
+            java.util.List<String[]> pairs = new java.util.ArrayList<>();
+            if (episodesJson != null && !episodesJson.isEmpty()) {
+                org.json.JSONArray arr = new org.json.JSONArray(episodesJson);
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    pairs.add(new String[]{o.optString("name", ""), o.optString("url", "")});
+                }
+            }
+            if (pairs.isEmpty()) {
+                pairs.add(new String[]{episodeName == null ? "" : episodeName,
+                        episodeUrl == null ? "" : episodeUrl});
+            }
+            com.fongmi.android.tv.api.hk.HkDlanState.setChapters(ruleTitle, name, episodeUrl, pairs);
+        } catch (Throwable ignored) {
+        }
+        Intent intent = new Intent(activity, VideoActivity.class);
+        intent.putExtra("key", HkDetailBridge.siteKey(ruleTitle));
+        intent.putExtra("id", episodeUrl);
+        intent.putExtra("name", name);
+        intent.putExtra("pic", pic);
+        intent.putExtra("hk_rule", ruleTitle);
+        intent.putExtra("hk_line", lineName);
+        intent.putExtra("hk_episode", episodeName);
+        intent.putExtra("hk_content", content == null ? "" : content);
+        intent.putExtra("hk_actor", actor == null ? "" : actor);
+        intent.putExtra("hk_director", director == null ? "" : director);
+        intent.putExtra("hk_remarks", remarks == null ? "" : remarks);
+        intent.putExtra("hk_direct_play", true);
+        // 选集串过大会撑爆 Binder 事务：大的先停进程内仓、Intent 只带凭据
+        if (episodesJson != null && episodesJson.length() > 100_000) {
+            String ref = "e" + HK_EPISODES_SEQ.incrementAndGet();
+            parkHkEpisodes(ref, episodesJson);
+            intent.putExtra("hk_episodes", "");
+            intent.putExtra("hk_episodes_ref", ref);
+        } else {
+            intent.putExtra("hk_episodes", episodesJson == null ? "" : episodesJson);
+        }
+        intent.putExtra("hk_episode_idx", selIdx);
+        activity.startActivity(intent);
     }
 
     public static void collect(Activity activity, String key, String id, String name, String pic) {
@@ -985,6 +1073,11 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
     }
 
     private void checkId() {
+        if (!TextUtils.isEmpty(getIntent().getStringExtra("hk_rule"))) {
+            if (getIntent().getBooleanExtra("hk_direct_play", false)) playHkDirect();
+            else getHkDetail();
+            return;
+        }
         if (getId().startsWith("push://")) getIntent().putExtra("key", SiteApi.PUSH).putExtra("id", getId().substring(7));
         if (getId().isEmpty() || getId().startsWith("msearch:")) setEmpty(false);
         else getDetail();
@@ -999,6 +1092,90 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         detailHealthRecorded = false;
         SpiderDebug.log("video-flow", "detail start key=%s id=%s name=%s", getKey(), getId(), getName());
         mViewModel.detailContent(getKey(), getId());
+    }
+
+    /**
+     * 海阔详情：HkRouter.detail() 取数 → HkDetailBridge 转 Vod → 走现有详情渲染。
+     * 引擎走 SiteApi 的 hkRouterCache 复用，同规则同会话只初始化一次。
+     */
+    private void getHkDetail() {
+        detailStartTime = System.currentTimeMillis();
+        mBinding.swipeLayout.setRefreshing(true);
+        new Thread(() -> {
+            try {
+                String ruleTitle = getIntent().getStringExtra("hk_rule");
+                String itemUrl = getIntent().getStringExtra("hk_item_url");
+                com.fongmi.android.tv.api.hk.HkRule rule = com.fongmi.android.tv.api.hk.HkRuleManager.get().getRule(ruleTitle);
+                if (rule == null) throw new IllegalStateException("hk rule missing: " + ruleTitle);
+                com.fongmi.android.tv.api.hk.HkItem item = new com.fongmi.android.tv.api.hk.HkItem(getName(), itemUrl, getPic(), getContent());
+                com.fongmi.android.tv.api.hk.HkDetail detail = SiteApi.getHkRouter(ruleTitle).detail(itemUrl, item, false);
+                Vod vod = HkDetailBridge.toVod(rule, getId(), detail);
+                App.post(() -> {
+                    mBinding.swipeLayout.setRefreshing(false);
+                    if (detail.isEmpty()) {
+                        showError(getString(R.string.error_detail));
+                        mBinding.progressLayout.showEmpty();
+                    } else {
+                        SpiderDebug.log("video-flow", "detail finish cost=%dms hk rule=%s", System.currentTimeMillis() - detailStartTime, ruleTitle);
+                        // 海阔电台改道：电台规则整表交听书路由（一期置不可用提示后返回）
+                        if (com.fongmi.android.tv.ui.HkRadioRouter.routeHkDetail(VideoActivity.this, ruleTitle, vod)) {
+                            finish();
+                            return;
+                        }
+                        setDetail(vod);
+                    }
+                });
+            } catch (Throwable e) {
+                App.post(() -> {
+                    mBinding.swipeLayout.setRefreshing(false);
+                    showError(getString(R.string.error_detail));
+                    mBinding.progressLayout.showEmpty();
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 海阔直接播放：用 extras 现场组装 Vod（单线路 + 选集表）走标准详情渲染，
+     * checkFlag/seamless 会自动起播选中集；播放走 playerContent(hk_) → Result(header)
+     * → PlayerManager 的 PlaySpec.from(result) 漏斗，headers 不丢。
+     */
+    private void playHkDirect() {
+        String lineName = Objects.toString(getIntent().getStringExtra("hk_line"), "");
+        String episodesJson = Objects.toString(getIntent().getStringExtra("hk_episodes"), "");
+        if (TextUtils.isEmpty(episodesJson)) episodesJson = unparkHkEpisodes(getIntent().getStringExtra("hk_episodes_ref"));
+        int selIdx = getIntent().getIntExtra("hk_episode_idx", 0);
+        Vod vod = new Vod();
+        vod.setId(getId());
+        vod.setName(getName());
+        vod.setPic(getPic());
+        vod.setContent(Objects.toString(getIntent().getStringExtra("hk_content"), ""));
+        vod.setActor(Objects.toString(getIntent().getStringExtra("hk_actor"), ""));
+        vod.setDirector(Objects.toString(getIntent().getStringExtra("hk_director"), ""));
+        vod.setRemarks(Objects.toString(getIntent().getStringExtra("hk_remarks"), ""));
+        Flag flag = Flag.create(lineName.isEmpty() ? "默认" : lineName);
+        try {
+            if (!TextUtils.isEmpty(episodesJson)) {
+                org.json.JSONArray arr = new org.json.JSONArray(episodesJson);
+                for (int i = 0; i < arr.length(); i++) {
+                    org.json.JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    flag.getEpisodes().add(Episode.create(o.optString("name", ""), o.optString("url", "")));
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (flag.getEpisodes().isEmpty()) {
+            String epName = Objects.toString(getIntent().getStringExtra("hk_episode"), "");
+            flag.getEpisodes().add(Episode.create(epName.isEmpty() ? getName() : epName, getId()));
+        }
+        vod.setFlags(java.util.List.of(flag));
+        setDetail(vod);
+        // 目标集非首集时补一次点选（首集由 seamless 自动起播）；服务未就绪（详情被暂存）时跳过，暂存重放走首集
+        if (service() != null && selIdx > 0 && selIdx < flag.getEpisodes().size()) {
+            Episode target = flag.getEpisodes().get(selIdx);
+            if (!target.isSelected()) onItemClick(target);
+        }
     }
 
     private void getDetail(Vod item) {

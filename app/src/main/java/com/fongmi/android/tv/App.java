@@ -117,6 +117,10 @@ public class App extends Application implements Application.ActivityLifecycleCal
         SiteFeature.apply();
         DanmakuSearchListFocusFixer.start();
         registerActivityLifecycleCallbacks(this);
+        // 海阔：8.83 本体 ActivityManager 登记（聚阅等插件经它取当前页）
+        registerActivityLifecycleCallbacks(com.example.hikerview.ui.ActivityManager.getInstance());
+        // 海阔：跨版本首次启动清一次图片毒缓存，内部自吞异常＋后台执行
+        try { com.fongmi.android.tv.api.hk.HkCachePurge.onStartup(); } catch (Throwable ignored) {}
         post(this::startBackgroundServices, 1200);
     }
 

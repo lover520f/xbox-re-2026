@@ -27,7 +27,6 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 
 import com.fongmi.android.tv.App;
-import com.fongmi.android.tv.ui.activity.DownloadActivity;
 import com.fongmi.android.tv.ui.activity.HistoryActivity;
 import com.fongmi.android.tv.api.hk.HkJsRuntime;
 import com.fongmi.android.tv.api.hk.HkLoading;
@@ -199,7 +198,8 @@ public class HkWebkitHolder implements HkWebViewHelper.ServiceWorkerInterceptor 
 
         @Override
         public void openDownloads(Activity activity) {
-            DownloadActivity.start(activity);
+            // 一期置不可用（oktv 无独立下载记录页；与 HkRouteBlocker.openDownloadRecords 同口径）
+            com.fongmi.android.tv.utils.Notify.show("该功能暂不支持");
         }
 
         @Override

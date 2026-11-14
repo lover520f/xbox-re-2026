@@ -25,6 +25,7 @@ public class Episode implements Parcelable, Diffable<Episode> {
     private int index;
     private int number;
     private boolean selected;
+    private transient boolean numberName;
     private transient String displayName;
 
     private Episode(String name, String desc, String url) {
@@ -51,6 +52,15 @@ public class Episode implements Parcelable, Diffable<Episode> {
 
     public static Episode create(String name, String desc, String url) {
         return new Episode(name, desc, url).trans();
+    }
+
+    /** 集名是不是组装时回退出来的序号（源没给名）：只作标记，不参与序列化/匹配。 */
+    public boolean isNumberName() {
+        return numberName;
+    }
+
+    public void setNumberName(boolean numberName) {
+        this.numberName = numberName;
     }
 
     public String getName() {

@@ -3,14 +3,13 @@ package com.fongmi.android.tv.ui;
 import android.app.Activity;
 
 import com.fongmi.android.tv.legado.LegadoAudio;
-import com.fongmi.android.tv.ui.activity.AudioBookActivity;
 import com.github.catvod.crawler.SpiderDebug;
 
 /**
  * 海阔电台路由：跟音乐路由一样是「调用」别的播放器——电台归听书播放器。
  * 识别口径：规则名含 电台/广播 且不含 音乐/听歌/歌曲（唱片电台那类歌单
  * 仍归音乐播放器）。命中后把选集整表建成听书专辑（台名＝集名），
- * 章节地址在听书页内走海阔解析（AudioBookActivity 的 hkRule 分支）。
+ * 章节地址在听书页内走海阔解析（星辰听书页的 hkRule 分支（一期不移植））。
  * 此前电台规则被音乐关键词（PyMusicSource 的识别表含「电台」）吞进
  * 音乐播放器、或落到视频播放器，听书从没被调用（他 2026-10-28 点名）。
  */
@@ -162,7 +161,9 @@ public class HkRadioRouter {
             }
             if (!found) start = Math.max(0, Math.min(selIdx, album.chapters.size() - 1));
             album.index = start;
-            AudioBookActivity.start(activity, LegadoAudio.put(album));
+            // oktvpro 一期：听书页不移植，置不可用
+            LegadoAudio.put(album);
+            try { android.widget.Toast.makeText(activity, "听书功能暂不可用", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignored2) {}
             try {
                 SpiderDebug.log("hk", "routeHk claimed rule=%s chapters=%d start=%d",
                         ruleTitle, album.chapters.size(), start);
@@ -216,7 +217,9 @@ public class HkRadioRouter {
                 return false;
             }
             album.index = 0;
-            AudioBookActivity.start(activity, LegadoAudio.put(album));
+            // oktvpro 一期：听书页不移植，置不可用
+            LegadoAudio.put(album);
+            try { android.widget.Toast.makeText(activity, "听书功能暂不可用", android.widget.Toast.LENGTH_SHORT).show(); } catch (Throwable ignored2) {}
             try {
                 SpiderDebug.log("hk", "routeHkDetail claimed rule=%s chapters=%d",
                         ruleTitle, album.chapters.size());

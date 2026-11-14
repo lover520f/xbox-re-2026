@@ -70,6 +70,16 @@ public class Result implements Parcelable {
     private List<Sub> subs;
     @SerializedName("playUrl")
     private String playUrl;
+
+    /** 海阔 PlayData 伴声音轨（transient）：SiteApi 海阔链置入，播放层经 PlaySpec 携带。 */
+    private transient java.util.List<String> hkAudioUrls;
+
+    /** 海阔 PlayData 歌词地址（transient）。 */
+    private transient String hkLyric;
+
+    /** 阅读会话（transient，一期阅读子系统不移植，恒空置）。 */
+    private transient com.fongmi.android.tv.read.ReadingSession readingSession;
+
     @SerializedName("artwork")
     private String artwork;
     @SerializedName("jxFrom")
@@ -255,6 +265,10 @@ public class Result implements Parcelable {
         return !DanmakuSetting.isLoad() || danmaku == null ? new ArrayList<>() : danmaku;
     }
 
+    public void setDanmaku(List<Danmaku> danmaku) {
+        this.danmaku = danmaku;
+    }
+
     public String getFormat() {
         return format;
     }
@@ -388,4 +402,28 @@ public class Result implements Parcelable {
             return new Result[size];
         }
     };
+
+    public java.util.List<String> getHkAudioUrls() {
+        return hkAudioUrls;
+    }
+
+    public void setHkAudioUrls(java.util.List<String> hkAudioUrls) {
+        this.hkAudioUrls = hkAudioUrls;
+    }
+
+    public String getHkLyric() {
+        return hkLyric;
+    }
+
+    public void setHkLyric(String hkLyric) {
+        this.hkLyric = hkLyric;
+    }
+
+    public com.fongmi.android.tv.read.ReadingSession getReadingSession() {
+        return readingSession;
+    }
+
+    public void setReadingSession(com.fongmi.android.tv.read.ReadingSession session) {
+        this.readingSession = session;
+    }
 }

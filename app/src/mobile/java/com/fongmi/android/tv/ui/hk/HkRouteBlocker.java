@@ -15,8 +15,6 @@ import com.fongmi.android.tv.api.hk.HkPageParser;
 import com.fongmi.android.tv.api.hk.HkParserKit;
 import com.fongmi.android.tv.api.hk.HkRule;
 import com.fongmi.android.tv.api.hk.HkRuleManager;
-import com.fongmi.android.tv.ui.activity.AdBlockActivity;
-import com.fongmi.android.tv.ui.activity.DownloadActivity;
 import com.fongmi.android.tv.ui.activity.FileActivity;
 import com.fongmi.android.tv.ui.activity.HistoryActivity;
 import com.fongmi.android.tv.ui.activity.HkFavoriteActivity;
@@ -257,7 +255,8 @@ public final class HkRouteBlocker {
 
             @Override
             public void openDownloadRecords(Activity activity) {
-                DownloadActivity.start(activity);
+                // oktvpro 一期：星辰下载页不移植，置不可用
+                toastShortBottom(activity, "该功能暂不支持");
             }
 
             @Override
@@ -274,13 +273,15 @@ public final class HkRouteBlocker {
             @Override
             public void openAdUrlList(Activity activity) {
                 // 8.83 广告网址列表；星辰唯一的广告页
-                AdBlockActivity.start(activity);
+                // oktvpro 一期：星辰广告页不移植，置不可用
+                toastShortBottom(activity, "该功能暂不支持");
             }
 
             @Override
             public void openAdRuleList(Activity activity) {
                 // 8.83 广告规则列表；星辰唯一的广告页
-                AdBlockActivity.start(activity);
+                // oktvpro 一期：星辰广告页不移植，置不可用
+                toastShortBottom(activity, "该功能暂不支持");
             }
 
             @Override

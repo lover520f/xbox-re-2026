@@ -95,6 +95,7 @@ public class SettingEnhanceActivity extends BaseActivity {
             else Notify.show(R.string.setting_custom_csp_permission_required);
         }));
         mBinding.lab.setOnClickListener(view -> LabActivity.start(this));
+        mBinding.hiker.setOnClickListener(view -> Notify.show(R.string.setting_hk_tv_hint));
         mBinding.loginState.setOnClickListener(view -> LoginStateLearnDialog.show(this, this::setText));
         mBinding.oneKeySync.setOnClickListener(v -> OneKeySyncDialog.create().show(this));
         mBinding.scriptManage.setOnClickListener(view -> ScriptManageDialog.show(this, this::setText));
@@ -107,6 +108,7 @@ public class SettingEnhanceActivity extends BaseActivity {
         ViewGroup parent = (ViewGroup) mBinding.customCsp.getParent();
         View[] order = {
                 mBinding.lab,
+                mBinding.hiker,
                 mBinding.customCsp,
                 mBinding.webHomeExtension,
                 mBinding.remoteTrust,

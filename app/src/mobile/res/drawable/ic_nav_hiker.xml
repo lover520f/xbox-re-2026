@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔底部导航图标：罗盘（线框风，48dp 与其余 nav 图标同规格） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:tint="?attr/colorControlNormal"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/white"
+        android:fillType="evenOdd"
+        android:pathData="M12,2A10,10 0 1,0 22,12A10,10 0 1,0 12,2ZM12,4.2A7.8,7.8 0 1,1 4.2,12A7.8,7.8 0 1,1 12,4.2Z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M15.9,8.1L13.4,13.4L8.1,15.9L10.6,10.6Z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,11.2A0.8,0.8 0 1,0 12.8,12A0.8,0.8 0 1,0 12,11.2Z" />
+</vector>

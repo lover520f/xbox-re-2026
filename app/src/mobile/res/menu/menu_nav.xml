@@ -25,4 +25,10 @@
         android:title="@string/lab_title"
         android:visible="false" />
 
+    <item
+        android:id="@+id/hiker"
+        android:icon="@drawable/ic_nav_hiker"
+        android:title="@string/nav_hiker"
+        android:visible="false" />
+
 </menu>

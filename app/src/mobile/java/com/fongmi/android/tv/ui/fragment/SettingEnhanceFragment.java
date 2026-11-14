@@ -12,6 +12,8 @@ import androidx.annotation.Nullable;
 import androidx.viewbinding.ViewBinding;
 
 import com.fongmi.android.tv.lab.LabActivity;
+import com.fongmi.android.tv.api.hk.HkConfig;
+import com.fongmi.android.tv.ui.activity.HkPageActivity;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.playback.ViewingRecordSyncStore;
 import com.fongmi.android.tv.remote.RemoteStore;
@@ -108,6 +110,11 @@ public class SettingEnhanceFragment extends BaseFragment {
             else Notify.show(R.string.setting_custom_csp_permission_required);
         }));
         mBinding.lab.setOnClickListener(view -> LabActivity.start(requireContext()));
+        mBinding.hiker.setOnClickListener(view -> HkPageActivity.start(requireContext()));
+        mBinding.hikerNav.setOnClickListener(view -> {
+            HkConfig.get().setNavEntry(!HkConfig.get().getNavEntry());
+            setText();
+        });
         mBinding.loginState.setOnClickListener(view -> LoginStateLearnDialog.show(this, this::setText));
         mBinding.oneKeySync.setOnClickListener(v -> OneKeySyncDialog.create().show(requireActivity()));
         mBinding.scriptManage.setOnClickListener(view -> ScriptManageDialog.show(this));
@@ -121,6 +128,8 @@ public class SettingEnhanceFragment extends BaseFragment {
         ViewGroup parent = (ViewGroup) mBinding.customCsp.getParent();
         View[] order = {
                 mBinding.lab,
+                mBinding.hiker,
+                mBinding.hikerNav,
                 mBinding.customCsp,
                 mBinding.webHomeExtension,
                 mBinding.remoteTrust,
@@ -150,6 +159,7 @@ public class SettingEnhanceFragment extends BaseFragment {
     }
 
     private void setText() {
+        safeSet("hikerNav", mBinding.hikerNavText, () -> getSwitch(HkConfig.get().getNavEntry()));
         if (!canSetText()) return;
         safeSet("driveCheck", mBinding.driveCheckText, () -> getSwitch(Setting.isDriveCheck()));
         safeSet("debugLog", mBinding.debugLogText, () -> getSwitch(Setting.isDebugLog()));
