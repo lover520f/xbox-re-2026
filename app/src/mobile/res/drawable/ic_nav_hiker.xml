@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 海阔底部导航图标：罗盘（线框风，48dp 与其余 nav 图标同规格） -->
+<!-- 海阔底部导航图标：海浪（线框细线风，48dp 与其余 nav 图标同规格；
+     三条正弦波浪线圆头描边、相位交错，选中/未选中两态均由 tint 着色。
+     旧版为罗盘实心+evenOdd 挖洞，在小尺寸下渲染发糊，故换描边波浪） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
@@ -7,13 +9,21 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="@android:color/white"
-        android:fillType="evenOdd"
-        android:pathData="M12,2A10,10 0 1,0 22,12A10,10 0 1,0 12,2ZM12,4.2A7.8,7.8 0 1,1 4.2,12A7.8,7.8 0 1,1 12,4.2Z" />
+        android:fillColor="@android:color/transparent"
+        android:pathData="M2,7Q4.5,4.6 7,7T12,7T17,7T22,7"
+        android:strokeWidth="1.9"
+        android:strokeColor="@android:color/white"
+        android:strokeLineCap="round" />
     <path
-        android:fillColor="@android:color/white"
-        android:pathData="M15.9,8.1L13.4,13.4L8.1,15.9L10.6,10.6Z" />
+        android:fillColor="@android:color/transparent"
+        android:pathData="M2,12Q4.5,14.4 7,12T12,12T17,12T22,12"
+        android:strokeWidth="1.9"
+        android:strokeColor="@android:color/white"
+        android:strokeLineCap="round" />
     <path
-        android:fillColor="@android:color/white"
-        android:pathData="M12,11.2A0.8,0.8 0 1,0 12.8,12A0.8,0.8 0 1,0 12,11.2Z" />
+        android:fillColor="@android:color/transparent"
+        android:pathData="M2,17Q4.5,14.6 7,17T12,17T17,17T22,17"
+        android:strokeWidth="1.9"
+        android:strokeColor="@android:color/white"
+        android:strokeLineCap="round" />
 </vector>
