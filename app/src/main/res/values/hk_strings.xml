@@ -6,9 +6,6 @@
     <string name="version_check_url2">https://ghproxy.com/https://raw.githubusercontent.com/qiusunshine/hiker-rules/master/versions.json</string>
     <string name="nav_hiker">海阔</string>
     <string name="hk_title">海阔</string>
-    <string name="hk_nav_entry_title">底部导航入口</string>
-    <string name="hk_nav_entry_hint">开：底部导航显示海阔 关：仅从增强设置进入</string>
-    <string name="setting_hk">海阔</string>
-    <string name="setting_hk_summary">规则浏览、导入与播放</string>
-    <string name="setting_hk_tv_hint">海阔暂仅支持手机端</string>
+    <string name="hk_nav_entry_title">底部导航海阔</string>
+    <string name="hk_nav_entry_hint">显示或隐藏首页底部导航的海阔入口</string>
 </resources>
