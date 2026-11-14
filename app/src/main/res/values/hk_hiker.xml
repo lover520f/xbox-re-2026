@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔本体移植配套值：hk_hiker.xml 中未被 S1 并入 hk_colors/hk_strings/hk_styles 的剩余条目（原文件其余条目已在 hk_* 专用文件，勿重复定义） -->
+<resources>
+    <color name="text">#ff222222</color>
+    <color name="badge_color_background">#ffe9363f</color>
+    <color name="gray_text2">#ffa4a4a4</color>
+    <item name="custom_tag" type="id" />
+</resources>
