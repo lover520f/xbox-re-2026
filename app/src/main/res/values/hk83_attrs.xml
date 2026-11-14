@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 海阔一期：main 源集 vendored 类 me.codeboy AlignTextView 所需的 align attr 与
+     AlignTextView styleable，从 mobile hk83_attrs.xml 摘出同名同值条目（main 代码
+     引用 R.styleable.AlignTextView，leanback 编译也需 main 侧有定义）。 -->
+<resources>
+    <attr name="align" format="integer">
+        <enum name="left" value="0" />
+        <enum name="center" value="1" />
+        <enum name="right" value="2" />
+    </attr>
+    <declare-styleable name="AlignTextView">
+        <attr name="align" />
+    </declare-styleable>
+</resources>
