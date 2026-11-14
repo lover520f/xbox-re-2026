@@ -11,6 +11,26 @@ if (localPropsFile.exists()) {
 }
 def hasReleaseSigning = localProps['storeFile'] && localProps['keyAlias'] && localProps['storePassword']
 def releaseKeyPassword = localProps['keyPassword'] ?: localProps['storePassword']
+// oktvpro 专用签名（方案 A）：keystore 与口令只存仓库外目录，本地与今后 CI 共用同一证书。
+// 目录可用环境变量 OKTVPRO_KEYS_DIR 覆盖，默认 ~/workspace/projects/oktvpro/keys；
+// 其中的 signing.properties（storeFile/keyAlias/storePassword/keyPassword）存在且齐全时，
+// debug 与 release 均改用该证书签名（本地测试包与正式包同证书、可互替安装）；
+// 文件不存在时完全保持原有行为（local.properties 的 release 签名 / AGP 默认 debug 签名），不报错。
+def oktvproKeysDir = System.getenv('OKTVPRO_KEYS_DIR') ?: "${System.getProperty('user.home')}/workspace/projects/oktvpro/keys"
+def oktvproProps = new Properties()
+def oktvproPropsFile = new File(oktvproKeysDir, 'signing.properties')
+if (oktvproPropsFile.exists()) {
+    oktvproPropsFile.withInputStream {
+        oktvproProps.load(it)
+    }
+}
+def hasOktvproSigning = oktvproProps['storeFile'] && oktvproProps['keyAlias'] && oktvproProps['storePassword']
+def oktvproStoreFile = null
+if (hasOktvproSigning) {
+    def storeFilePath = oktvproProps['storeFile'].toString()
+    oktvproStoreFile = new File(storeFilePath).isAbsolute() ? new File(storeFilePath) : new File(oktvproPropsFile.parentFile, storeFilePath)
+}
+def oktvproKeyPassword = oktvproProps['keyPassword'] ?: oktvproProps['storePassword']
 def fastRelease = (project.findProperty('fastRelease') ?: 'false').toString().toBoolean()
 def buildTimestamp = new Date().format('yyyyMMddHHmm', TimeZone.getTimeZone('Asia/Shanghai'))
 def buildTime = fastRelease ? "fast-${buildTimestamp}" : buildTimestamp
@@ -93,6 +113,14 @@ android {
             // minSdk 24：v2 从 API 24 起由系统支持，v1/JAR 与 v3 均不需要（本仓库不做密钥轮换）。
             // CI 只用 apksigner 签 v2（v1/v3 关闭），见 android-release.yml；本 DSL 不启用 v1。
         }
+        oktvpro {
+            if (hasOktvproSigning) {
+                storeFile oktvproStoreFile
+                keyAlias oktvproProps['keyAlias']
+                keyPassword oktvproKeyPassword
+                storePassword oktvproProps['storePassword']
+            }
+        }
     }
 
     buildTypes {
@@ -102,6 +130,15 @@ android {
             signingConfig = hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro', 'proguard-rules-media.pro'
         }
+    }
+
+    // oktvpro 专用签名优先：properties 存在时 debug/release 共用同一证书（互替安装）。
+    // 不改上方 release 行原文——CI(android-release.yml) 按原文 sed 关闭 Gradle 签名后
+    // 改用 apksigner 签 v2；CI 环境未提供 OKTVPRO_KEYS_DIR 时 hasOktvproSigning 为
+    // false，本段不生效，原流程不受影响。
+    if (hasOktvproSigning) {
+        buildTypes.debug.signingConfig = signingConfigs.oktvpro
+        buildTypes.release.signingConfig = signingConfigs.oktvpro
     }
 
     // APK 签名卫生（通用规则，勿删）：本工程只签 v2，v1/v3 均关闭。
