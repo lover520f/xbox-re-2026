@@ -304,6 +304,16 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         if (ref != null && episodesJson != null) HK_EPISODES_PARK.put(ref, episodesJson);
     }
 
+    // S6：海阔直达首播凭据——HkPage 点集时已以 play(url, extra) 解析好的地址
+    // （intent 的 id）。星辰 playHkDirect 是 setupDirectEpisodes 渲染选集 +
+    // playDirect(getId()) 直播已解析地址；S3 改接时把首播也压进标准详情管线
+    // （seamless/补发 onItemClick → playerContent 重解析选集原址），已解析地址
+    // 被弃用、原址缺 extra 上下文重解析失败时首播也跟着死。此处只在直达组装的
+    // 目标集第一次经 getPlayer 起播时消费一次，之后切集（含重点目标集）一律走
+    // 原址 + 注册表 extra 的 playerContent 重解析。
+    private String mHkFirstPlayUrl;
+    private String mHkFirstPlayEpisodeKey;
+
     private static String unparkHkEpisodes(String ref) {
         return ref == null ? "" : Objects.toString(HK_EPISODES_PARK.remove(ref), "");
     }
@@ -1154,13 +1164,17 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         vod.setDirector(Objects.toString(getIntent().getStringExtra("hk_director"), ""));
         vod.setRemarks(Objects.toString(getIntent().getStringExtra("hk_remarks"), ""));
         Flag flag = Flag.create(lineName.isEmpty() ? "默认" : lineName);
+        String hkRuleTitle = Objects.toString(getIntent().getStringExtra("hk_rule"), "");
         try {
             if (!TextUtils.isEmpty(episodesJson)) {
                 org.json.JSONArray arr = new org.json.JSONArray(episodesJson);
                 for (int i = 0; i < arr.length(); i++) {
                     org.json.JSONObject o = arr.optJSONObject(i);
                     if (o == null) continue;
-                    flag.getEpisodes().add(Episode.create(o.optString("name", ""), o.optString("url", "")));
+                    String epUrl = o.optString("url", "");
+                    flag.getEpisodes().add(Episode.create(o.optString("name", ""), epUrl));
+                    // S6：每集 extra 登记进桥接注册表，供页内切集时 hkPlayerContent 查表补传
+                    HkDetailBridge.registerEpisodeExtra(hkRuleTitle, epUrl, o.optString("extra", ""));
                 }
             }
         } catch (Throwable ignored) {
@@ -1168,6 +1182,14 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         if (flag.getEpisodes().isEmpty()) {
             String epName = Objects.toString(getIntent().getStringExtra("hk_episode"), "");
             flag.getEpisodes().add(Episode.create(epName.isEmpty() ? getName() : epName, getId()));
+        }
+        // S6：目标集首播凭据（intent id = HkPage 已解析地址），getPlayer 首次命中目标集时消费
+        if (!TextUtils.isEmpty(getId()) && selIdx >= 0 && selIdx < flag.getEpisodes().size()) {
+            Episode firstTarget = flag.getEpisodes().get(selIdx);
+            if (!getId().equals(firstTarget.getUrl())) {
+                mHkFirstPlayUrl = getId();
+                mHkFirstPlayEpisodeKey = audioQueueEpisodeKey(firstTarget);
+            }
         }
         vod.setFlags(java.util.List.of(flag));
         setDetail(vod);
@@ -1298,12 +1320,20 @@ public class VideoActivity extends PlaybackActivity implements Clock.Callback, C
         String playFlag = getEpisodePlayFlag(flag, episode);
         String previousEpisodeKey = Objects.toString(mPlaybackEpisodeKey, "");
         mPlaybackEpisodeKey = audioQueueEpisodeKey(episode);
-        SpiderDebug.log("video-flow", "player start key=%s flag=%s episode=%s url=%s", getKey(), playFlag, episode.getName(), episode.getUrl());
+        // S6：海阔直达目标集首播用 HkPage 已解析地址（一次性消费）；其余一律选集原址重解析
+        String playId = episode.getUrl();
+        if (mHkFirstPlayUrl != null && HkDetailBridge.isHkKey(getKey())
+                && mHkFirstPlayEpisodeKey != null && mHkFirstPlayEpisodeKey.equals(mPlaybackEpisodeKey)) {
+            playId = mHkFirstPlayUrl;
+            mHkFirstPlayUrl = null;
+            mHkFirstPlayEpisodeKey = null;
+        }
+        SpiderDebug.log("video-flow", "player start key=%s flag=%s episode=%s url=%s", getKey(), playFlag, episode.getName(), playId);
         mInlineLyrics = getEpisodeInlineLyrics(episode);
         applyPlaybackArtwork(episode);
         clearLyrics();
         if (shouldUseImmersiveAudio()) setAudioStageVisible(true);
-        mViewModel.playerContent(getKey(), playFlag, episode.getUrl());
+        mViewModel.playerContent(getKey(), playFlag, playId);
         mBinding.control.title.setSelected(true);
         updateHistory(episode);
         showProgress();

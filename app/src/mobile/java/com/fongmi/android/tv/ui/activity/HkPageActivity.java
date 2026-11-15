@@ -5147,6 +5147,7 @@ public class HkPageActivity extends BaseActivity {
                     o.put("name", stripHtml(di.getTitle()));
                     o.put("url", du);
                     o.put("pic", di.getPic() == null ? "" : di.getPic());
+                    o.put("extra", di.getExtra());
                     arr.put(o);
                 } catch (Throwable ignored) {
                 }
@@ -5211,6 +5212,7 @@ public class HkPageActivity extends BaseActivity {
                     o.put("name", stripHtml(di.getTitle()));
                     o.put("url", du);
                     o.put("pic", di.getPic() == null ? "" : di.getPic());
+                    o.put("extra", di.getExtra());
                     arr.put(o);
                 } catch (Throwable ignored) {
                 }

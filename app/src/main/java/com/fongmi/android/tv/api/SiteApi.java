@@ -424,7 +424,11 @@ public class SiteApi {
             SpiderDebug.log("player", "hk reading diverted kind=NOVEL rule=%s", title);
             return novelResult;
         }
-        HkPlay play = router.play(id);
+        // S6：页内切集只有 (key, flag, id) 三元组，条目 extra 由组装方登记在
+        // HkDetailBridge 注册表里，按 (规则名, 地址) 查表补传——与 HkPageActivity
+        // 点集时 play(url, extra) 的上下文对齐；未登记时保持无 extra 旧路。
+        String hkExtra = HkDetailBridge.episodeExtra(key, id);
+        HkPlay play = hkExtra == null ? router.play(id) : router.play(id, hkExtra);
         // 阅读分流（漫画 pics://）：命中则直接返回带会话的 Result，不再组装视频地址。
         // pics 只由 pics:// 分支产出，视频规则永远不走该分支。
         // 整套 play 请求头带进会话（旧口径只摘 Referer 一个值，其余头在此全丢——漫画没画面断点）

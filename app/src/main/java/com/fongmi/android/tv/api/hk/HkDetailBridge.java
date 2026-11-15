@@ -24,6 +24,29 @@ public class HkDetailBridge {
         return key != null && key.startsWith(KEY_PREFIX);
     }
 
+    // ===== 选集 extra 注册表（S6）=====
+    // 条目 extra 是 HkRouter.play(url, extra) 的第二形参（嗅探的 ua/referer/取址
+    // 脚本等上下文皆出自此），此前只有 HkPageActivity 的播放入口能传：它点集时
+    // 先在页内以 play(url, extra) 解析出地址再交播放器。VideoActivity 页内切集
+    // 走 SiteApi.playerContent(key, flag, url) 三元组、带不了 extra，hkPlayerContent
+    // 只能 play(url) 裸解析，缺上下文的选集（webRule/x5Rule 嗅探类尤甚）必然失败——
+    // 表现为「海阔页点哪集播哪集、详情页内换集播不了」。故由选集组装方
+    // （VideoActivity.playHkDirect）按 (规则名, 选集地址) 登记、播放拦截处查表补传。
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> EPISODE_EXTRAS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void registerEpisodeExtra(String ruleTitle, String episodeUrl, String extra) {
+        if (ruleTitle == null || ruleTitle.isEmpty() || episodeUrl == null || episodeUrl.isEmpty()) return;
+        if (extra == null || extra.isEmpty()) return;
+        if (EPISODE_EXTRAS.size() > 1024) EPISODE_EXTRAS.clear();
+        EPISODE_EXTRAS.put(ruleTitle + "|" + episodeUrl, extra);
+    }
+
+    /** 按站点 key（hk_<规则名>）+ 选集地址查 extra；未登记回 null（调用方走无 extra 旧路）。 */
+    public static String episodeExtra(String siteKey, String episodeUrl) {
+        if (siteKey == null || episodeUrl == null || !isHkKey(siteKey)) return null;
+        return EPISODE_EXTRAS.get(siteKey.substring(KEY_PREFIX.length()) + "|" + episodeUrl);
+    }
+
     public static Vod toVod(HkRule rule, String itemUrl, HkDetail detail) {
         Vod vod = new Vod();
         vod.setId(itemUrl == null ? "" : itemUrl);
