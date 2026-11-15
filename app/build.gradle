@@ -203,7 +203,7 @@ androidComponents {
 }
 
 dependencies {
-    implementation fileTree(dir: "libs", include: ["*.aar"])
+    implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
     // 海阔（hiker）移植依赖：照星辰原行（transplant-set §4）
     implementation libs.rhino
     implementation libs.litepal
