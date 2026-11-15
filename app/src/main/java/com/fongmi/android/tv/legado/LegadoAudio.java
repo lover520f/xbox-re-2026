@@ -27,6 +27,7 @@ public class LegadoAudio {
         public String legadoKey = "";
         public String hkRule = "";
         public String hkLine = "";
+        public String hkHistoryKey = "";
         public String sourceName = "";
         public String title = "";
         public String coverUrl = "";

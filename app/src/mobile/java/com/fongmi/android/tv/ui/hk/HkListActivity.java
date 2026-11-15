@@ -10,8 +10,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -54,6 +56,12 @@ import com.fongmi.android.tv.api.hk.HkPageParser;
 import com.fongmi.android.tv.api.hk.HkPlayData;
 import com.fongmi.android.tv.api.hk.HkRule;
 import com.fongmi.android.tv.api.hk.HkRuleManager;
+import com.fongmi.android.tv.api.hk.event.home.OnRefreshEvent;
+import com.fongmi.android.tv.api.hk.event.home.SetPageLastChapterRuleEvent;
+import com.fongmi.android.tv.api.hk.event.home.SetPageParamsEvent;
+import com.fongmi.android.tv.api.hk.event.home.SetPagePicEvent;
+import com.fongmi.android.tv.api.hk.event.home.SetPageTitleEvent;
+import com.fongmi.android.tv.api.hk.event.rule.ShowSelectOptionsEvent;
 import com.fongmi.android.tv.read.ReadingGate;
 import com.fongmi.android.tv.read.ReadingRouter;
 import com.fongmi.android.tv.read.ReadingSession;
@@ -114,6 +122,84 @@ public class HkListActivity extends AppCompatActivity
     public static void clearTempParentData() {
         tempParentData = null;
     }
+
+    // ===== 播放交接终点工具（掉帧批 ①，账 hk-player-jank-fix-20261115）=====
+    // startPlayerChapters 实现体已整体挪到交接执行器（分发器 HkDetailBridge
+    // 投递），但实现体末端的「打开目标面」动作必须在主线程发生。本工具把
+    // 终点动作同步回主线程执行：调用线程等到动作在主线程跑完才续行，故各
+    // 支原有的 try/catch 与回退分支（电台问询的布尔、听书改道失败落回原
+    // 分发）在结果已知处续行，与今天主线程同步形逐点同。宿主已销毁/正在
+    // 销毁时动作不执行、回 false（记名微差：今天同步形在页面销毁竞态里仍
+    // 会强行打开，改后静默丢弃并留一行日志——销毁中的页面本就不该再开
+    // 新面）。已在主线程时直执（保其他同步入口的原形）。
+
+    private static final Handler HANDOVER_MAIN = new Handler(Looper.getMainLooper());
+
+    /** 终点动作（无返回值形）：执行了回 true，宿主已销毁被丢弃回 false。 */
+    private static boolean runTerminalOnMain(Activity activity, Runnable action) {
+        Boolean done = callTerminalOnMain(activity, () -> {
+            action.run();
+            return Boolean.TRUE;
+        });
+        return Boolean.TRUE.equals(done);
+    }
+
+    /**
+     * 终点动作（带返回值形，如电台问询的认领布尔）：主线程执行并把结果
+     * 带回调用线程；宿主已销毁回 null（调用方按「未成」原语义续行）。
+     * 动作在主线程抛出的异常原样回传调用线程重抛（RuntimeException/Error
+     * 不包装；其余受检异常包一层 RuntimeException——各支的 catch(Throwable)
+     * 照样接住，仅日志字样多一层包装名，记名）。
+     */
+    private static <T> T callTerminalOnMain(Activity activity,
+                                            java.util.concurrent.Callable<T> action) {
+        if (activity != null && (activity.isFinishing() || activity.isDestroyed())) {
+            com.github.catvod.crawler.SpiderDebug.log("hk", "handover terminal dropped host-gone act=%s",
+                    activity.getClass().getSimpleName());
+            return null;
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            try {
+                return action.call();
+            } catch (Throwable t) {
+                throw asRuntime(t);
+            }
+        }
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicReference<T> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicReference<Throwable> error =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        HANDOVER_MAIN.post(() -> {
+            try {
+                // 投递到执行之间宿主可能刚销毁：到点再查一次，口径同上。
+                if (activity != null && (activity.isFinishing() || activity.isDestroyed())) {
+                    com.github.catvod.crawler.SpiderDebug.log("hk", "handover terminal dropped host-gone-late act=%s",
+                            activity.getClass().getSimpleName());
+                    return;
+                }
+                result.set(action.call());
+            } catch (Throwable t) {
+                error.set(t);
+            } finally {
+                done.countDown();
+            }
+        });
+        try {
+            done.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (error.get() != null) throw asRuntime(error.get());
+        return result.get();
+    }
+
+    private static RuntimeException asRuntime(Throwable t) {
+        if (t instanceof RuntimeException) return (RuntimeException) t;
+        if (t instanceof Error) throw (Error) t;
+        return new RuntimeException(t);
+    }
     private static final AtomicBoolean STATICS_READY = new AtomicBoolean(false);
     private static volatile WeakReference<Activity> currentRef;
 
@@ -122,6 +208,9 @@ public class HkListActivity extends AppCompatActivity
 
     private HkArticleFragment fragment;
     private HkRule rule;
+    /** A3 宿主半（136b）：官 FilmListActivity 的 ruleData 字段同位——开页时
+     * 摄入的规则串本体，setParams 事件时反解改写后重序列化回写本字段。 */
+    private String ruleData;
     private String pageTitle;
     /** 本页是否为专用网页页（goWeb 承载登记的唯一合法宿主，见 HkWebCarrier）。 */
     private boolean webCarrierPage;
@@ -132,6 +221,38 @@ public class HkListActivity extends AppCompatActivity
     }
     /** 照原版 FilmListActivity.isOnPause：onResume 置假、onPause 置真，供 back() 订阅守卫。 */
     private boolean isOnPause;
+    /**
+     * C4（簇5b）：照官 FilmListActivity$1 的宿主滚动监听——官在 initData
+     * （源行 359）以 fragment.setScrollListener 注入，本体只服务沉浸工具栏
+     * （overallXScroll 累加＋adjustToolbarImBg，toolbarHeight&gt;0 门）。咱家宿主
+     * 无沉浸工具栏（immersiveTheme 恒 false、无 toolbar_im_bg），该半无落点；
+     * 监听本体在此只承接其前提动作：记住内容列表本体，供 F7 双击回顶/回底
+     * 的在顶判定（官 fragment.isAtTop 的宿主侧等价读法）在手势时刻现查。
+     */
+    private RecyclerView hostListRecyclerView;
+    private final RecyclerView.OnScrollListener hostScrollListener = new RecyclerView.OnScrollListener() {
+        @Override
+        public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
+            super.onScrolled(rv, dx, dy);
+            hostListRecyclerView = rv;
+        }
+
+        @Override
+        public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
+            super.onScrollStateChanged(rv, newState);
+            hostListRecyclerView = rv;
+        }
+    };
+    /** F7（簇5b）：页头双击手势检测器（官 FilmListActivity.gestureDetector 对位），onCreate 建一次。 */
+    private GestureDetector headerGestureDetector;
+    /** 顶部小程序页签行本体（buildMiniappTabs 缓存，供 F7 手势的落点界判定）。 */
+    private View miniappTabsRow;
+    /**
+     * 官 FilmListActivity.showEvent 的等价槽（B2）：点条目走 memoryPosition
+     * 记录链时置入（官 Fragment 在同链调宿主 setLastClick(LastClickShowEvent)），
+     * 宿主 onResume 在场时复显＋复标后清空；无点击记录时恒空、回页不动作。
+     */
+    private String pendingLastClickShow;
     /** 顶部小程序切换 tabs 的规则集（自旧内容页迁入，行为不变）。 */
     private final java.util.List<HkRule> miniappRules = new java.util.ArrayList<>();
     private boolean childHasWebView;
@@ -241,6 +362,19 @@ public class HkListActivity extends AppCompatActivity
     }
 
     /**
+     * 提示/弹窗的宿主供给（两处 activityProvider 专用）：报错窗与提示窗必须
+     * 落在当前页面之上（他 2026-11-14 层级线），挂回已被盖住的列表页会沉到
+     * 页面后面。故先取全应用当前页（App.activity()＝最近 resumed 的页），
+     * 它在且未结束/未销毁时用它；取不到才回落上面的列表页本体。
+     * currentActivity() 本体不动——HkFuck 等页内接缝要的仍是列表页自己。
+     */
+    public static Activity topOrListActivity() {
+        Activity top = App.activity();
+        if (top != null && !top.isFinishing() && !top.isDestroyed()) return top;
+        return currentActivity();
+    }
+
+    /**
      * 照原版 FilmListActivity.putTempRule(Intent, String)：空串直接放 "data" extra；
      * 字节长大于 0x32000 时放静态槽并写缓存文件，Intent 不带数据；否则放 "data" extra。
      */
@@ -339,6 +473,10 @@ public class HkListActivity extends AppCompatActivity
     /** 桥与静态接线（各海阔面进入时统一调用，故 public）。 */
     public static void ensureStatics() {
         if (!STATICS_READY.compareAndSet(false, true)) return;
+        // D1（W4）：初始化整段包 try——旧形 CAS 先置真后裸跑，任一步抛错即
+        // STATICS_READY 永真、进程内再不重试，海阔静态接线永久半残。失败时
+        // 复位 false 并留日志，下次任一海阔面进入可整段重试；成功路径不变。
+        try {
         Context app = App.get();
         // 海阔存储层（LitePal）初始化收口在此（2026-11-14 口径）：官在
         // Application 初始化是因为官整包就是海阔；咱家海阔是模块，初始化不进
@@ -354,8 +492,16 @@ public class HkListActivity extends AppCompatActivity
             return effective != null ? engineBridge.evalWithRule(effective, js, input) : input;
         });
         HkArticleFragment.setDetailBridge(new HkDetailBridge());
-        HkEngineBridge.activityProvider = HkListActivity::currentActivity;
-        HkDetailBridge.activityProvider = HkListActivity::currentActivity;
+        HkEngineBridge.activityProvider = HkListActivity::topOrListActivity;
+        HkDetailBridge.activityProvider = HkListActivity::topOrListActivity;
+        // 136b S3：授权事件承接注册一次——HkAuthBridgeHandler 订阅 AuthBridgeEvent
+        // （规则 JS 的 findJavaClass/loadJavaClass/registerDNS 官链生产），裁决经
+        // resultSink 回 HkJsRuntime.updateAuth 落规则 "_auth" 表（官 updateAuth 同位）。
+        HkAuthBridgeHandler.register();
+        HkAuthBridgeHandler.resultSink = (authRule, authMethod, authResult) -> {
+            HkJsRuntime rt = HkJsRuntime.getInstance();
+            if (rt != null) rt.updateAuth(authRule, authMethod, authResult);
+        };
         // DetailBridge 宿主钩子：文件编辑器（editFile:// 的 0x4e16 回流在本类闭环）、
         // 播放交接（F：PlayerChooser → VideoActivity.startHkPlay）、下载对话框/快速下载（G）。
         HkDetailBridge.hooks = new HkDetailBridge.HostHooks() {
@@ -441,24 +587,43 @@ public class HkListActivity extends AppCompatActivity
                 String film = extraData == null ? null : extraData.getString("film");
                 String ruleTitle = "";
                 String ruleJson = extraData == null ? null : extraData.getString("rule");
+                HkRule pageRule = null;
                 if (!TextUtils.isEmpty(ruleJson)) {
                     try {
-                        HkRule r = new Gson().fromJson(ruleJson, HkRule.class);
-                        if (r != null && r.getTitle() != null) ruleTitle = r.getTitle();
+                        pageRule = new Gson().fromJson(ruleJson, HkRule.class);
+                        if (pageRule != null && pageRule.getTitle() != null) ruleTitle = pageRule.getTitle();
                     } catch (Exception ignored) {
                     }
                 }
                 if (TextUtils.isEmpty(ruleTitle)) {
                     ruleTitle = !TextUtils.isEmpty(film) ? film : hostRuleTitle(activity);
                 }
-                // 阅读模块阶段二：小说规则的章节表改道小说阅读器，不进 VideoActivity。
-                // 视频规则原样走下（type 不是"小说"）。
-                if (ReadingGate.isHkNovelRule(ruleTitle)) {
+                // 有效规则身份（账 heji-subrule-routing）：聚合容器页规则只是
+                // 壳（type 恒 video/all），被点子规则全文在页规则 params 的
+                // extra.RULE 里——取子规则本体分类；取不到回落按标题查库
+                // 分类（独立导入规则）。idTitle=身份名（子规则名/规则名，
+                // 供书架分组与进度键），resTitle=解析名（SiteApi 按名建
+                // 路由器：独立规则用自身名、容器子规则用容器名，章节地址
+                // 自带劫持上下文，与视频链同口径）。
+                HkRule effRule = ReadingGate.effectiveRule(pageRule);
+                String effJson = effRule == null ? null : ReadingGate.effectiveRuleJson(pageRule);
+                String idTitle = effRule != null && !TextUtils.isEmpty(effRule.getTitle())
+                        ? effRule.getTitle() : ruleTitle;
+                String resTitle = pageRule != null && !TextUtils.isEmpty(pageRule.getTitle())
+                        ? pageRule.getTitle() : ruleTitle;
+                ReadingGate.HkReadKind readKind = effRule != null
+                        ? ReadingGate.classifyHkRule(effRule)
+                        : ReadingGate.classifyHkTitle(ruleTitle);
+                // 阅读模块阶段二：阅读族规则的章节表按族分流，不进 VideoActivity。
+                // 小说格改道小说阅读器（阶段二原形，判据由 type=="小说" 一词
+                // 扩到阅读族分类：read 声明的小说同样命中）。
+                if (readKind == ReadingGate.HkReadKind.NOVEL) {
                     try {
                         ReadingSession ns = new ReadingSession();
                         ns.kind = ReadingSession.Kind.NOVEL;
-                        ns.sourceName = ruleTitle;
-                        ns.ruleTitle = ruleTitle;
+                        ns.sourceName = idTitle;
+                        ns.ruleTitle = idTitle;
+                        ns.hkRuleJson = effJson == null ? "" : effJson;
                         ns.bookTitle = !TextUtils.isEmpty(mTitle) && !mTitle.equals(ruleTitle) ? mTitle : "";
                         for (HkArticleFragment.HkChapter ch : chapters) {
                             ReadingSession.Chapter rc = new ReadingSession.Chapter(
@@ -479,17 +644,107 @@ public class HkListActivity extends AppCompatActivity
                         ReadingSession.Chapter cur = ns.currentChapter();
                         ns.chapterUrl = cur.url;
                         if (TextUtils.isEmpty(ns.bookTitle)) ns.bookTitle = cur.name;
-                        // 有阅读进度则从上次章节/位置继续
-                        ReadingStore.Record nprog = ReadingStore.find("NOVEL", ruleTitle, ns.bookTitle);
-                        if (nprog != null && nprog.chapterIndex >= 0 && nprog.chapterIndex < ns.chapters.size()) {
-                            ns.chapterIndex = nprog.chapterIndex;
-                            ns.chapterUrl = ns.currentChapter().url;
+                        // 海阔历史（2026-11-14 他亲定双规：海阔历史必有数
+                        // 据＋阅读/音乐不留痕）：海阔小说的进度唯一住所＝
+                        // 海阔 History，不再读 ReadingStore。键按条目页址
+                        // 取详情形、无页址（搜索/桥面直递）按被点章址取直
+                        // 达形，与视频记录同键形。先按记录恢复章序与章内
+                        // 万分比，再建记录（已有只刷新展示字段、不覆盖
+                        // 进度字段——recordOpened 的分工）。
+                        String nKey = TextUtils.isEmpty(pageUrl) || pageUrl.equals(cur.url)
+                                ? com.fongmi.android.tv.api.hk.HkHistoryRecorder.keyOf(resTitle, cur.url)
+                                : com.fongmi.android.tv.api.hk.HkHistoryRecorder.keyOf(resTitle, pageUrl);
+                        ns.hkHistoryKey = nKey;
+                        com.fongmi.android.tv.bean.History nh =
+                                com.fongmi.android.tv.api.hk.HkHistoryRecorder.findByKey(nKey);
+                        if (nh != null && !TextUtils.isEmpty(nh.getEpisodeUrl())) {
+                            for (int i = 0; i < ns.chapters.size(); i++) {
+                                if (nh.getEpisodeUrl().equals(ns.chapters.get(i).url)) {
+                                    ns.chapterIndex = i;
+                                    ns.chapterUrl = ns.chapters.get(i).url;
+                                    if (nh.getPosition() > 0) {
+                                        ns.startFraction = (int) Math.min(nh.getPosition(), 10000);
+                                    }
+                                    break;
+                                }
+                            }
                         }
-                        ReadingRouter.openReading(activity, ns);
+                        com.fongmi.android.tv.api.hk.HkHistoryRecorder.recordOpened(
+                                nKey, ns.bookTitle, cur.pic, "",
+                                ns.chapters.get(ns.chapterIndex).name,
+                                ns.chapters.get(ns.chapterIndex).url);
+                        // 终点动作回主线程（掉帧批 ①）：打开阅读器是开面动作，
+                        // 拼装在交接执行器、开面回主线程，见类头终点工具。
+                        runTerminalOnMain(activity, () -> ReadingRouter.openReading(activity, ns));
                     } catch (Throwable t) {
                         android.util.Log.e(TAG, "novel divert failed", t);
                     }
                     return;
+                }
+                // 听书格：章节表组 LegadoAudio 专辑进听书播放器（与电台改道
+                // 同一承接面/同一解析口，hkRule 用解析名、章节地址原样——
+                // 播放时按章走 SiteApi 海阔解析，与视频链同路）。此前
+                // read 族听书全落 VideoActivity，音频在视频面里播、无专辑
+                // 与进度机器。改道失败不 return，落回下方原分发。
+                if (readKind == ReadingGate.HkReadKind.AUDIO) {
+                    try {
+                        com.fongmi.android.tv.legado.LegadoAudio.AudioAlbum album =
+                                new com.fongmi.android.tv.legado.LegadoAudio.AudioAlbum();
+                        album.legadoKey = "hk:" + idTitle;
+                        album.hkRule = resTitle;
+                        album.sourceName = idTitle;
+                        int aIdx = 0;
+                        java.util.List<String> aRawUrls = new java.util.ArrayList<>();
+                        for (int i = 0; i < chapters.size(); i++) {
+                            HkArticleFragment.HkChapter ch = chapters.get(i);
+                            String nm = !TextUtils.isEmpty(ch.title) ? ch.title
+                                    : (ch.memoryTitle == null ? "" : ch.memoryTitle);
+                            String aUrl = playUrlForChapter(ch);
+                            aRawUrls.add(aUrl);
+                            album.chapters.add(new com.fongmi.android.tv.legado.LegadoAudio.Chapter(
+                                    nm, aUrl));
+                            if (ch.use) aIdx = i;
+                            if (album.coverUrl.isEmpty() && ch.pic != null && !ch.pic.isEmpty()) {
+                                album.coverUrl = ch.pic;
+                            }
+                        }
+                        // 线路名接真线组数据（账 §五-5）：与视频链同两口回收——
+                        // 先从全表集地址的懒入参回收当前线名（全表一致才采信），
+                        // 再看被点章 PlayData 自带的线路名表；都回收不到才回落
+                        // 「默认」。此前恒「默认」，多线路听书子规则在专辑里选错线。
+                        String aLine = currentLineNameOf(chapters, aRawUrls);
+                        if (aLine.isEmpty() && aIdx >= 0 && aIdx < aRawUrls.size()) {
+                            HkPlayData aPd = playDataOf(aRawUrls.get(aIdx));
+                            if (aPd != null && aPd.getNames() != null && !aPd.getNames().isEmpty()
+                                    && !TextUtils.isEmpty(aPd.getNames().get(0))) {
+                                aLine = aPd.getNames().get(0);
+                            }
+                        }
+                        album.hkLine = aLine.isEmpty() ? "默认" : aLine;
+                        album.title = !TextUtils.isEmpty(mTitle) && !mTitle.equals(ruleTitle)
+                                ? mTitle : album.chapters.get(aIdx).name;
+                        album.index = aIdx;
+                        // 海阔历史（同小说格口径）：键带入专辑——听书页据
+                        // 它在海阔 History 里恢复章序/位置并回写进度；先
+                        // 建记录（进度字段归听书页的回写，这里只落形）。
+                        String aKey = TextUtils.isEmpty(pageUrl)
+                                || pageUrl.equals(aRawUrls.get(aIdx))
+                                ? com.fongmi.android.tv.api.hk.HkHistoryRecorder.keyOf(resTitle, aRawUrls.get(aIdx))
+                                : com.fongmi.android.tv.api.hk.HkHistoryRecorder.keyOf(resTitle, pageUrl);
+                        album.hkHistoryKey = aKey;
+                        com.fongmi.android.tv.api.hk.HkHistoryRecorder.recordOpened(
+                                aKey, album.title, album.coverUrl, album.hkLine,
+                                album.chapters.get(aIdx).name, album.chapters.get(aIdx).url);
+                        // 终点动作回主线程（掉帧批 ①）：put 是纯数据登记留在
+                        // 执行器，start 开面回主线程；宿主已销毁被丢弃时照旧
+                        // return（终点丢弃口径，见类头终点工具）。
+                        String albumId = com.fongmi.android.tv.legado.LegadoAudio.put(album);
+                        runTerminalOnMain(activity,
+                                () -> com.fongmi.android.tv.ui.activity.AudioBookActivity.start(activity, albumId));
+                        return;
+                    } catch (Throwable t) {
+                        android.util.Log.e(TAG, "audio divert failed", t);
+                    }
                 }
                 int selIdx = 0;
                 for (int i = 0; i < chapters.size(); i++) {
@@ -500,8 +755,13 @@ public class HkListActivity extends AppCompatActivity
                 }
                 HkArticleFragment.HkChapter sel = chapters.get(selIdx);
                 String selUrl = playUrlForChapter(sel);
-                String selTitle = !TextUtils.isEmpty(sel.memoryTitle) ? sel.memoryTitle
-                        : (sel.title == null ? "" : sel.title);
+                // 集名口径统一（毛病10 N1）：交接名一律 title 优先——载荷
+                //  builders（buildFlagsPayload/扁平/电台表）全是 title 优先，
+                // 旧形此处 memoryTitle 优先与播放器选集表两副名（同文件
+                // playThunderLink 亦 title 优先，自相矛盾）。title 是官
+                // getChapters 的正形名，memoryTitle 只作列表页显示名。
+                String selTitle = !TextUtils.isEmpty(sel.title) ? sel.title
+                        : (sel.memoryTitle == null ? "" : sel.memoryTitle);
                 // 电台问询前置（定根账候选三）：认领信号两路（claimSignal，
                 // 页标题取交接 bundle 的 film、条目标题取选中集名）。规则名
                 // 命中（sig=1）：x5Play 地址不先开网页，剥壳后继续走下面的
@@ -528,9 +788,16 @@ public class HkListActivity extends AppCompatActivity
                             o.put("pic", ch.pic == null ? "" : ch.pic);
                             arr.put(o);
                         }
-                        if (com.fongmi.android.tv.ui.HkRadioRouter.routeHkWithTitles(activity,
-                                ruleTitle, film, selTitle, "默认", stripSel, selTitle,
-                                albumName, sel.pic == null ? "" : sel.pic, arr.toString(), selIdx)) {
+                        // 终点动作回主线程（掉帧批 ①）：问询含开面/认领，整支
+                        // 回主线程执行、布尔带回本处按原分支续行（未成落回原
+                        // 分流，一行不变）；宿主已销毁回 null 按未成处理。
+                        final int askIdx = selIdx;
+                        final String askRuleTitle = ruleTitle;
+                        Boolean routed = callTerminalOnMain(activity, () ->
+                                com.fongmi.android.tv.ui.HkRadioRouter.routeHkWithTitles(activity,
+                                        askRuleTitle, film, selTitle, "默认", stripSel, selTitle,
+                                        albumName, sel.pic == null ? "" : sel.pic, arr.toString(), askIdx));
+                        if (Boolean.TRUE.equals(routed)) {
                             return;
                         }
                     } catch (Throwable t) {
@@ -543,15 +810,17 @@ public class HkListActivity extends AppCompatActivity
                 // 余量是播放数据 JSON 的不分流承载页，照常走下方交接（播放器入口剥壳解载荷）
                 if (selUrl.startsWith("x5Play://") && !radioName
                         && !selUrl.substring("x5Play://".length()).trim().startsWith("{")) {
-                    openX5PlayPage(activity, sel.memoryTitle, selUrl.substring("x5Play://".length()));
+                    // 终点动作回主线程（掉帧批 ①）：开承载页回主线程执行。
+                    String x5Target = selUrl.substring("x5Play://".length());
+                    runTerminalOnMain(activity, () -> openX5PlayPage(activity, sel.memoryTitle, x5Target));
                     return;
                 }
                 if (radioName) {
                     com.github.catvod.crawler.SpiderDebug.log("hk", "x5 radio-ask chapters rule=%s", ruleTitle);
                     if (selUrl.startsWith("x5Play://")) selUrl = selUrl.substring("x5Play://".length());
                 }
-                String selName = !TextUtils.isEmpty(sel.memoryTitle) ? sel.memoryTitle
-                        : (sel.title == null ? "" : sel.title);
+                String selName = !TextUtils.isEmpty(sel.title) ? sel.title
+                        : (sel.memoryTitle == null ? "" : sel.memoryTitle);
                 // 播放器标题用页面标题：子列表页的活动标题就是被点视频名（dealRule 经 req.title 传入），
                 // 原版 PlayerChooser 用的正是这个 MTitle；一级列表页活动标题与规则名相同、不可用，回退选中集标题
                 String name = !TextUtils.isEmpty(mTitle) && !mTitle.equals(ruleTitle) ? mTitle : selName;
@@ -697,8 +966,16 @@ public class HkListActivity extends AppCompatActivity
                 // G8：被点章无图时封面回采详情头图（交接带入的 detailPic 兜底）；
                 // 简介/演职员/备注随交接带入播放页详情面（缺失为空串，不摆占位）。
                 String handoverPic = !TextUtils.isEmpty(sel.pic) ? sel.pic : detailPic;
-                VideoActivity.startHkPlay(activity, ruleTitle, startLineName, firstLineUrl, selName, name,
-                        handoverPic, payload, selIdx, detailContent, detailActor, detailDirector, detailRemarks);
+                // 终点动作回主线程（掉帧批 ①）：拼装到此为止全在交接执行器，
+                // 打开播放页回主线程执行（其内投屏登记等同步段随之在主线程，
+                // 量级远小于整表建模解析，见账 ① 接收侧记名）。
+                final int startIdx = selIdx;
+                final String startRuleTitle = ruleTitle;
+                final String startFirstUrl = firstLineUrl;
+                final String startPayload = payload;
+                runTerminalOnMain(activity, () -> VideoActivity.startHkPlay(activity, startRuleTitle, startLineName,
+                        startFirstUrl, selName, name, handoverPic, startPayload, startIdx,
+                        detailContent, detailActor, detailDirector, detailRemarks));
             }
 
             @Override
@@ -980,6 +1257,10 @@ public class HkListActivity extends AppCompatActivity
         HkFuck.loadList();
         // hiker:// 目标页路由钩子（C1）：搜索 + 目标页全量装配，搜索页/列表页/小程序页共用
         HkRouteBlocker.wireAllHooks();
+        } catch (Throwable t) {
+            STATICS_READY.set(false);
+            Log.e(TAG, "ensureStatics failed, will retry on next hk entry", t);
+        }
     }
 
     /** 本页规则标题（播放交接取 siteKey 用）。 */
@@ -1545,68 +1826,26 @@ public class HkListActivity extends AppCompatActivity
         return out;
     }
 
-    /** 某集在某条线路下的实际地址：取 urls[线路]（越界回 urls[0]），该线路的请求头/字幕/分离音频/弹幕随址打包。 */
+    /** 某集在某条线路下的实际地址：本体已移入 HkHttpParser.expandLineUrl（列表路与详情路共用同一打包口径，毛病3(iv)），此处只留委托口。 */
     static String expandedUrl(HkPlayData pd, String rawUrl, int line) {
-        if (pd == null) return rawUrl;
-        java.util.List<String> urls = pd.getUrls();
-        if (urls == null || urls.isEmpty()) return rawUrl;
-        String u = urls.get(line < urls.size() ? line : 0);
-        u = u == null ? "" : u.trim();
-        if (u.isEmpty()) return rawUrl;
-        java.util.List<String> kvs = new java.util.ArrayList<>();
-        java.util.List<Map<String, String>> headers = pd.getHeaders();
-        if (headers != null && line < headers.size() && headers.get(line) != null) {
-            for (Map.Entry<String, String> e : headers.get(line).entrySet()) {
-                String k = e.getKey() == null ? "" : e.getKey().trim();
-                String v = e.getValue() == null ? "" : e.getValue().trim();
-                if (!k.isEmpty() && !v.isEmpty()) kvs.add(k + "@" + v);
-            }
-        }
-        if (pd.getHeader() != null && line == 0) {
-            for (Map.Entry<String, String> e : pd.getHeader().entrySet()) {
-                String k = e.getKey() == null ? "" : e.getKey().trim();
-                String v = e.getValue() == null ? "" : e.getValue().trim();
-                if (!k.isEmpty() && !v.isEmpty()) kvs.add(k + "@" + v);
-            }
-        }
-        // 附带字段随址打包（G49/G59）：subtitle/audioUrls/danmu 都在入参 pd 里
-        // （HkPlayData 9 字段、解析时按名直填），从 pd 直读——旧形 pd 无此三
-        // 字段才从原始串补读，字段补齐后补读绕路收净（F1 补改）。audioUrls
-        // 按线路取（越界回首条，与 urls 同口径）；lyric 环34 起同路入 mini 包
-        // ——回环解析 parsePlayJson 读 lyric 入 HkPlay、经 hkPlayerContent 入
-        // Result/PlaySpec 播放层（旧形「无消费面不入包」随终端消费补齐收净）。
-        String subtitle = pd.getSubtitle() == null ? "" : pd.getSubtitle().trim();
-        String audio = "";
-        java.util.List<String> audioUrls = pd.getAudioUrls();
-        if (audioUrls != null && !audioUrls.isEmpty()) {
-            String a = audioUrls.get(line < audioUrls.size() ? line : 0);
-            audio = a == null ? "" : a.trim();
-        }
-        String danmu = pd.getDanmu() == null ? "" : pd.getDanmu().trim();
-        String lyric = pd.getLyric() == null ? "" : pd.getLyric().trim();
-        if (kvs.isEmpty() && subtitle.isEmpty() && audio.isEmpty() && danmu.isEmpty() && lyric.isEmpty()) return u;
-        try {
-            JSONObject mini = new JSONObject();
-            JSONArray mu = new JSONArray();
-            mu.put(u);
-            mini.put("urls", mu);
-            if (!kvs.isEmpty()) {
-                JSONArray mh = new JSONArray();
-                for (String kv : kvs) mh.put(kv);
-                mini.put("headers", mh);
-            }
-            if (!subtitle.isEmpty()) mini.put("subtitle", subtitle);
-            if (!danmu.isEmpty()) mini.put("danmu", danmu);
-            if (!lyric.isEmpty()) mini.put("lyric", lyric);
-            if (!audio.isEmpty()) {
-                JSONArray ma = new JSONArray();
-                ma.put(audio);
-                mini.put("audioUrls", ma);
-            }
-            return mini.toString();
-        } catch (Exception e) {
-            return u;
-        }
+        return HkHttpParser.expandLineUrl(pd, rawUrl, line);
+    }
+
+    /**
+     * 一集在全局线名表第 line 条线下的自有线序（毛病4）：旧形 buildFlagsPayload
+     * 按裸下标取每集自己的 urls[line]——各集线名序/数互异时静默错线（B 线的
+     * 地址挂到 A 线名下、连带请求头错位）。现按线名对齐：本集线名表里查表
+     * 中线名的位置；本集无此线名（或本集本就单线）回 0＝本集主址（位置对齐
+     * 的结构要求下这是刻意的回退：该集在此线下只能以主址出演，不许拿别线
+     * 地址冒充）。表外线序（line 越界）原样回 line，交 expandLineUrl 的越界
+     * 回 0 口径处理。
+     */
+    static int episodeLineIndex(HkPlayData pd, java.util.List<String> lineNames, int line) {
+        if (pd == null || lineNames == null || line < 0 || line >= lineNames.size()) return line;
+        java.util.List<String> names = namesOf(pd);
+        if (names.size() <= 1) return 0;
+        int idx = names.indexOf(lineNames.get(line));
+        return idx >= 0 ? idx : 0;
     }
 
     private static String nz(String s) {
@@ -1928,7 +2167,10 @@ public class HkListActivity extends AppCompatActivity
                     JSONObject o = new JSONObject();
                     o.put("name", !TextUtils.isEmpty(ch.title) ? ch.title
                             : (ch.memoryTitle == null ? "" : ch.memoryTitle));
-                    o.put("url", expandedUrl(playDatas.get(i), rawUrls.get(i), line));
+                    // 毛病4：按线名对齐取本集自有线序，不再裸下标——各集
+                    // 线名序互异时旧形把别线地址/请求头挂到本线名下。
+                    o.put("url", expandedUrl(playDatas.get(i), rawUrls.get(i),
+                            episodeLineIndex(playDatas.get(i), lineNames, line)));
                     o.put("pic", ch.pic == null ? "" : ch.pic);
                     eps.put(o);
                 }
@@ -1984,6 +2226,7 @@ public class HkListActivity extends AppCompatActivity
             showRecycledAndExit();
             return;
         }
+        ruleData = data;
         try {
             rule = new Gson().fromJson(data, HkRule.class);
         } catch (Exception e) {
@@ -2024,6 +2267,29 @@ public class HkListActivity extends AppCompatActivity
         fragment.setListHost(getIntent().getBooleanExtra("listHost", false));
         fragment.setPageOpener(this);
         fragment.setImmersiveTheme(false);
+        // C4（簇5b）：照官 FilmListActivity.initData 同点位（源行 359，赶在
+        // FragmentTransaction 提交 385-388 之前）注入宿主滚动监听；咱家点位在
+        // commitNow 之前，与其余 setter 同列。Fragment 侧 initView 在
+        // scrollListener 非空时才 addOnScrollListener＋挂 fastScroller 联动，
+        // 故必须赶在提交前注入。官注入带 isImmersiveTheme 门（其监听只服务
+        // 沉浸工具栏）；咱家监听另承 F7 在顶判定，故无条件注入、本体内
+        // 沉浸半无落点（见 hostScrollListener 字段注）。
+        fragment.setScrollListener(hostScrollListener);
+        // F7（簇5b）：照官 setDoubleTab（源行 412-446）建手势检测器一次；
+        // 官挂在 Toolbar 与其容器两视图的 OnTouchListener 上，咱家宿主无标题
+        // 栏视图，落点改走 dispatchTouchEvent 的页签行界内喂食（见该法注）。
+        headerGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                // 官 FilmListActivity$2.onDoubleTap（源行 416-423）：fragment
+                // 在场时，isAtTop→scrollToBottom、否则 scrollToTop（官宿主两法
+                // 直调 fragment.scrollBottomSmooth/scrollTopSmooth）。
+                if (fragment == null || isFinishing()) return false;
+                if (isHostListAtTop()) scrollToBottom();
+                else scrollToTop();
+                return false;
+            }
+        });
         // 照原版 FilmListActivity 同点位：setReadTheme(isReadTheme())——url 含
         // #readTheme# 或 #autoReader# 即阅读主题（官 FilmListActivity:1611/5370）。
         fragment.setReadTheme(isReadThemeUrl(rule.getUrl()));
@@ -2078,6 +2344,21 @@ public class HkListActivity extends AppCompatActivity
     protected void onResume() {
         isOnPause = false;
         super.onResume();
+        // B2（W4）：照官 FilmListActivity.onResume（源行 1315-1335）——showEvent
+        // 在场时以（规则 url＋页面标题）重查历史记录 lastClick，存量与待复显
+        // 不一致时以存量为准换入；再 showLastClick 复显＋
+        // fragment.refreshLastClick(-1, title, 5) 定点复标，末尾清槽。
+        // 历史读法与首绑同源（getLastClick，即 Fragment 首绑经 onQueryLastClick
+        // 读的那份存储）。官另有 !isFullTheme 门：咱家宿主无 fullTheme 判据
+        // （Fragment 同名字段恒未置真），该门无落点、记名略过。
+        if (pendingLastClickShow != null && fragment != null && rule != null) {
+            String show = pendingLastClickShow;
+            String stored = getLastClick(rule.getUrl(), pageTitle);
+            if (!TextUtils.isEmpty(stored) && !stored.equals(show)) show = stored;
+            onShowLastClick(show);
+            fragment.refreshLastClick(-1, show, 5);
+            pendingLastClickShow = null;
+        }
         currentRef = new WeakReference<>(this);
         HkLoading.setListener(hkLoadingListener);
     }
@@ -2118,6 +2399,161 @@ public class HkListActivity extends AppCompatActivity
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onBackMainEvent(com.fongmi.android.tv.api.hk.event.video.BackMainEvent event) {
         if (getIntent().getBooleanExtra("listHost", false)) finish();
+    }
+
+    // —— 面⑤ A1/A2/A4/A5 订阅落点迁移·宿主半（簇5b）——
+    // 官 FilmListActivity 宿主订阅四件（MAIN＋!isOnPause/!finishing 门，官源行
+    // 719/740/826/863）此前迁在 HkArticleFragment 订阅（isResumed 门）。本节照官
+    // 在宿主落订阅：宿主自有半（setTitle/intent 改写/宿主规则改写/pageTitle 同步）
+    // 在此直落，Fragment 内部半（declaredPageTitle、DTO 改写、记录存储写、选项
+    // 弹框＋回求值＋dealUrl）经现行持有面 fragment 委托其既有同名法执行——委托
+    // 法即片段现行订阅本体，片段侧 @Subscribe 的摘除属主线缝（见分账
+    // fill-136b-c5b-host.md 置顶双挂风险与缝合顺序：摘除落地前两处并存、同事件
+    // 双触发，本节各法体内的宿主半与委托半均按最终单挂形态写）。
+
+    /**
+     * A1（簇5b）：照官 FilmListActivity.onSetTitle（源行 719-733）——门过后取
+     * intent 旧标题、setTitle＋intent "title" 改写新标题，异步半按旧标题改历史
+     * 记录标题。落序死点：委托必须先行——fragment.onSetPageTitle 本体以 intent
+     * 现值作旧标题取键（同步段读完才排异步写），宿主若先改 intent，旧标题键即
+     * 失效、历史改名落空；故先委托（其内完成 setTitle/intent/declaredPageTitle/
+     * 历史写全链），宿主半在委托后同值补写 setTitle/intent 并同步 pageTitle
+     * 字段（本宿主 B2 复显/onMemoryPosition 以它为键，官 MTitle 即 intent
+     * 标题、无此字段差）。
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onSetPageTitle(SetPageTitleEvent event) {
+        if (isOnPause() || isFinishing()) return;
+        if (event == null || event.getTitle() == null) return;
+        String t = event.getTitle();
+        if (TextUtils.isEmpty(t)) return;
+        if (fragment != null) fragment.onSetPageTitle(event);
+        // 委托后同值补写：片段内门（isResumed）挡下委托时，宿主自有半仍照官落
+        // （旧标题键已由委托同步段先读走，此处重写不伤其异步写）。
+        setTitle(t);
+        if (getIntent() != null) getIntent().putExtra("title", t);
+        pageTitle = t;
+    }
+
+    /**
+     * A2（簇5b）：照官 FilmListActivity.onSetPic（源行 740-749＋lambda$11）——
+     * 门过后 intent "picUrl" 改写，异步半改历史/收藏 pic。落序同 A1 先委托：
+     * fragment.onSetPagePic 完成 intent 改写＋历史/收藏写全链（键＝DTO url＋
+     * intent 标题，与既有记录同键；官 lambda$11 以宿主当前标题取键，A1 已把
+     * intent 标题与活动标题同步改写、两键同值）；宿主半在委托后再同值补写
+     * intent 一次，保证委托因片段未 resumed 被其内门挡下时宿主 intent 仍照官
+     * 改写（同值重复写无副作用）。
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onSetPagePic(SetPagePicEvent event) {
+        if (isOnPause() || isFinishing()) return;
+        if (event == null || event.getUrl() == null) return;
+        if (fragment != null) fragment.onSetPagePic(event);
+        if (getIntent() != null) getIntent().putExtra("picUrl", event.getUrl());
+    }
+
+    /**
+     * A4（簇5b）：照官 FilmListActivity.onSetLastChapterRule（源行 826-834＋
+     * lambda$13）——门过后宿主规则本体 last_chapter_rule 改写（官改宿主
+     * articleListRule；咱家宿主 rule 此前无人改此字段、迁移新增此半），异步半
+     * 写回收藏记录。DTO 改写与收藏写半委托 fragment.onSetLastChapterRule
+     * （DTO 在片段手里、收藏写以 DTO url 为键——咱家记录产生/回读全走 DTO 键，
+     * 与既有记录同键；官 lambda$13 以宿主规则 url 为 CUrl 键，键源差属既有
+     * 记录体系形态、本簇不改）。
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onSetLastChapterRule(SetPageLastChapterRuleEvent event) {
+        if (isOnPause() || isFinishing()) return;
+        if (event == null || event.getRule() == null) return;
+        if (rule != null) rule.setLastChapterRule(event.getRule());
+        if (fragment != null) fragment.onSetLastChapterRule(event);
+    }
+
+    /**
+     * A5（簇5b）：照官 FilmListActivity.onShowSelectOptions（源行 863-866）——
+     * 门过后 ArticleListIsland.showSelectOptions（选项弹框＋回求值＋dealUrl）。
+     * 咱家事件类以树为准为 ShowSelectOptionsEvent（rule 包），弹框全链在
+     * fragment.onShowSelectOptions 内（HkCenterListPopup＋evalJS＋dealUrlSimply，
+     * 普查 A5 已核等价、options2 图标位缺记名在彼），宿主半只落门＋委托。
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onShowSelectOptions(ShowSelectOptionsEvent event) {
+        if (isOnPause() || isFinishing()) return;
+        if (event == null) return;
+        if (fragment != null) fragment.onShowSelectOptions(event);
+    }
+
+    /**
+     * A3 宿主半（136b）：照官 FilmListActivity.onSetParams（源行 773-783）三件——
+     * ①宿主 rule.setParams；②fragment.updateParams（官为宿主直调；片段自有
+     * onSetPageParams 订阅另管历史/收藏两记录写，本法直调只重写其两份规则
+     * 对象、同值幂等）；③ruleData 串反解→setParams→重序列化回写字段。
+     * 门照宿主四件同款（!isOnPause＋!finishing＋params/rule 非空）。
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onSetPageParams(SetPageParamsEvent event) {
+        if (isOnPause() || isFinishing()) return;
+        if (event == null || event.getParams() == null || rule == null) return;
+        rule.setParams(event.getParams());
+        if (fragment != null) fragment.updateParams(event.getParams());
+        if (ruleData != null) {
+            try {
+                HkRule rd = new Gson().fromJson(ruleData, HkRule.class);
+                if (rd != null) {
+                    rd.setParams(event.getParams());
+                    ruleData = new Gson().toJson(rd);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** F7（簇5b）：官宿主 scrollToTop（源行 450）——直调 fragment.scrollTopSmooth；官沉浸半（overallXScroll/adjustToolbarImBg）咱家无沉浸工具栏、无落点。 */
+    private void scrollToTop() {
+        if (fragment != null) fragment.scrollTopSmooth();
+    }
+
+    /** F7（簇5b）：官宿主 scrollToBottom（源行 458）——直调 fragment.scrollBottomSmooth；官沉浸半无落点同上。 */
+    private void scrollToBottom() {
+        if (fragment != null) fragment.scrollBottomSmooth();
+    }
+
+    /**
+     * F7 在顶判定：官 fragment.isAtTop（官 ArticleListFragment 源行 25350 本体
+     * 查其列表）——咱家 Fragment 无此法，宿主以 C4 注入监听记下的列表本体现查
+     * canScrollVertically(-1)（列表不能再向顶滚＝已在顶），语义同位。列表本体
+     * 尚未经任何滚动落入监听时（刚开页、未滚过）列表恒在顶、回 true。
+     */
+    private boolean isHostListAtTop() {
+        return hostListRecyclerView == null || !hostListRecyclerView.canScrollVertically(-1);
+    }
+
+    /**
+     * F7（簇5b）：双击手势喂食点。官落点是标题栏视图的 OnTouchListener
+     * （setDoubleTab 对 Toolbar 与其容器两视图各挂一份、共用一检测器）。咱家
+     * 宿主布局（activity_hk_list.xml）无标题栏视图，唯一页头区＝他定案的小程序
+     * 页签行（hk_miniapp_tabs_row）；页签行内的点击热区（chip/「全部」钮）归
+     * 子视图自有点击，宿主绝不拦截——故在此只旁观：事件落点在页签行矩形内才
+     * 喂检测器，且恒走 super 原样分发、从不消费，单击切换/点选与滚动一字不变。
+     * 双击成立时检测器回调按官判定直调片段两滚动法（不用 OnTopEvent 投递：
+     * 该事件为空类、无方向位，且片段 onTopEvent 对 HkListActivity 宿主恒
+     * return——官 FilmListActivity 本体亦从不投此事件，生产形即宿主直调）。
+     * 页签行不可见时（子页级 listHost/规则≤1）无页头可承接，此路不喂、记名。
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (headerGestureDetector != null && miniappTabsRow != null
+                && miniappTabsRow.getVisibility() == View.VISIBLE) {
+            int[] loc = new int[2];
+            miniappTabsRow.getLocationOnScreen(loc);
+            float x = ev.getRawX();
+            float y = ev.getRawY();
+            if (x >= loc[0] && x < loc[0] + miniappTabsRow.getWidth()
+                    && y >= loc[1] && y < loc[1] + miniappTabsRow.getHeight()) {
+                headerGestureDetector.onTouchEvent(ev);
+            }
+        }
+        return super.dispatchTouchEvent(ev);
     }
 
     /** 照原版 initView 数据全丢分支：温馨提示「页面数据被系统回收，即将退出该页面。」确认后退出。 */
@@ -2396,7 +2832,10 @@ public class HkListActivity extends AppCompatActivity
         if (fragment == null || rule == null) return;
         HkItem item = fragment.getItemAt(position);
         if (item == null) return;
-        putLastClick(rule.getUrl(), pageTitle, item.getTitle() + "@@" + position);
+        String lastClick = item.getTitle() + "@@" + position;
+        putLastClick(rule.getUrl(), pageTitle, lastClick);
+        // B2：官同链的宿主 setLastClick 半——把本次点击暂存为回页待复显事件。
+        pendingLastClickShow = lastClick;
     }
 
     /**
@@ -2513,6 +2952,7 @@ public class HkListActivity extends AppCompatActivity
      */
     private void buildMiniappTabs() {
         View row = findViewById(R.id.hk_miniapp_tabs_row);
+        miniappTabsRow = row;
         if (row == null) return;
         if (getIntent().getBooleanExtra("listHost", false)) {
             row.setVisibility(View.GONE);
@@ -2569,6 +3009,13 @@ public class HkListActivity extends AppCompatActivity
                 } catch (Throwable ignored) {
                 }
             });
+            // F6（簇5b）：官 MainActivity 页签生产点（lambda$bindView$33，源行
+            // 1105-1110：已在当前页再击其签→post OnRefreshEvent）——咱家页签单击
+            // 是他定案的切换功能，只承接「双击当前已选中签」一格（不触发切换）：
+            // adapter 对绑定时即为当前项的 chip 旁观双击、成立才投事件（事件类
+            // 由簇5a 新建于 event.home、本法引用之；消费半在 ArticleListFragment
+            // 的 onRefresh 订阅，官源行 1159-1161：hint 门→回顶＋autoRefresh）。
+            adapter.setOnCurrentDoubleTap(() -> EventBus.getDefault().post(new OnRefreshEvent()));
             RecyclerView tabsRv = findViewById(R.id.hk_rv_miniapp_tabs);
             tabsRv.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
             // 横向 tab 行不抢垂直滚动：避免嵌套滚动冲突
@@ -2668,11 +3115,17 @@ public class HkListActivity extends AppCompatActivity
         private final java.util.List<String[]> pairs;
         private int selected;
         private final OnPick listener;
+        /** F6（簇5b）：双击「当前已选中签」的回调（宿主投 OnRefreshEvent）；可空。 */
+        private Runnable onCurrentDoubleTap;
 
         MiniappChipAdapter(java.util.List<String[]> pairs, int selected, OnPick listener) {
             this.pairs = pairs;
             this.selected = selected;
             this.listener = listener;
+        }
+
+        void setOnCurrentDoubleTap(Runnable onCurrentDoubleTap) {
+            this.onCurrentDoubleTap = onCurrentDoubleTap;
         }
 
         static class Holder extends RecyclerView.ViewHolder {
@@ -2713,6 +3166,27 @@ public class HkListActivity extends AppCompatActivity
             h.chip.setBackgroundResource(sel ? R.drawable.hk_chip_selected : 0);
             h.chip.setTypeface(null, sel ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
             h.chip.setTextColor(sel ? 0xFF8A6D00 : 0xFF8A8F98);
+            // F6（簇5b）：双击判定旁观层——只对「绑定时即当前选中项」的 chip 喂
+            // 独立 GestureDetector，OnTouchListener 恒 return false 不消费任何
+            // 事件：单击仍原样走下方 OnClickListener 切换（含本项点击的既有
+            // no-op 形），双击的两次单击亦照旧分发、切换行为一字不变；双击成立
+            // 且绑定时为当前项才回调。非当前项的绑定快照恒 false：双击未选中签
+            // 时首击已切换并 finish 本页，第二击即便落回也不投刷新（且宿主帖
+            // 投递时本页 finishing、消费门自理）。检测器随每次 bind 新建，无跨
+            // 位置残留。
+            final boolean currentAtBind = sel;
+            final GestureDetector chipDetector = new GestureDetector(h.chip.getContext(),
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onDoubleTap(MotionEvent e) {
+                            if (currentAtBind && onCurrentDoubleTap != null) onCurrentDoubleTap.run();
+                            return false;
+                        }
+                    });
+            h.chip.setOnTouchListener((v, e) -> {
+                chipDetector.onTouchEvent(e);
+                return false;
+            });
             h.chip.setOnClickListener(v -> {
                 int pos = h.getBindingAdapterPosition();
                 if (pos == RecyclerView.NO_POSITION) return;

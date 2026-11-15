@@ -38,6 +38,8 @@ public class ReadingSession {
     public List<String> images = new ArrayList<>();
     public String text = "";
     public String ruleTitle = "";
+    public String hkRuleJson = "";
+    public String hkHistoryKey = "";
     public String chapterUrl = "";
     public String referer = "";
     public String pageUrl = "";

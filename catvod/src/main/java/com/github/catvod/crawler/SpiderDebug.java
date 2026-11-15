@@ -59,6 +59,27 @@ public class SpiderDebug {
         Logger.t(safeTag(tag)).d(DiagnosticText.clean(message).text());
     }
 
+    /** 强制版（星辰同名 API）：无视分类过滤，失败诊断必落盘；绝不抛异常。 */
+    public static void forceLog(String tag, Throwable th) {
+        if (th == null) return;
+        try {
+            String message = DiagnosticText.throwable(th);
+            DebugLogStore.add(tag, message, true);
+            Logger.t(safeTag(tag)).e(message);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void forceLog(String tag, String msg, Object... args) {
+        if (TextUtils.isEmpty(msg)) return;
+        try {
+            String message = format(msg, args);
+            DebugLogStore.add(tag, message, true);
+            Logger.t(safeTag(tag)).e(DiagnosticText.clean(message).text());
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static String safeTag(String tag) {
         return DiagnosticText.clean(TextUtils.isEmpty(tag) ? TAG : tag).text();
     }

@@ -5,6 +5,11 @@ import android.util.Log;
 
 import com.fongmi.android.tv.api.hk.util.HkCodeUtil;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -16,6 +21,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import okhttp3.Call;
@@ -59,6 +65,18 @@ public class HkHttpParser {
     public static void setJsBridge(JsBridge bridge) {
         jsBridge = bridge;
     }
+
+    /**
+     * webview 取数支的共享执行池（对应官 HeavyTaskUtil 的共享池语义）：
+     * 旧形每调一次 get() 新建一条 singleThreadExecutor 且从不 shutdown，
+     * 每次 webview 取数漏一条常驻线程；改进程级共享缓存池（守护线程）。
+     */
+    private static final ExecutorService WEBVIEW_EXECUTOR =
+            Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "hk-http-webview");
+                t.setDaemon(true);
+                return t;
+            });
 
     /** okgo HttpParams 的最小替代（仅 8.83 用到的 put 语义）。 */
     public static class HttpParams {
@@ -417,7 +435,19 @@ public class HkHttpParser {
         }
         if (url.startsWith("{") && url.endsWith("}")) {
             try {
-                HkPlayData data = GSON.fromJson(url, HkPlayData.class);
+                // 面②#6：官 PlayData 经 fastjson 解析，String 字段/元素/Map 值
+                // 走 parseString 收敛；咱家旧形 Gson 直解，header 值或 urls
+                // 元素为数字/对象即整包抛错、回退成整串 JSON 当 url 静默坏播。
+                // 先树预处理收敛再走 Gson 串路（字段集见 coercePlayDataObject）。
+                JsonElement el = JsonParser.parseString(url);
+                HkPlayData data;
+                if (el != null && el.isJsonObject()) {
+                    JsonObject obj = el.getAsJsonObject();
+                    coercePlayDataObject(obj);
+                    data = GSON.fromJson(obj.toString(), HkPlayData.class);
+                } else {
+                    data = GSON.fromJson(url, HkPlayData.class);
+                }
                 if (data.getUrls() != null && !data.getUrls().isEmpty()) {
                     if (data.getNames() == null || data.getNames().isEmpty()) {
                         List<String> names = new ArrayList<>();
@@ -427,6 +457,15 @@ public class HkHttpParser {
                         data.setNames(names);
                     } else if (data.getNames().size() > data.getUrls().size()) {
                         data.setNames(new ArrayList<>(data.getNames().subList(0, data.getUrls().size())));
+                    } else if (data.getNames().size() < data.getUrls().size()) {
+                        // 毛病3(i)：线名短于线数时旧形原样透传，下游按名数
+                        // 算线数即塌线（多出的线无名无面）。补齐到同长，
+                        // 补名口径与空名分支一致（线路N，N＝线序）。
+                        List<String> names = new ArrayList<>(data.getNames());
+                        for (int i = names.size(); i < data.getUrls().size(); i++) {
+                            names.add("线路" + (i + 1));
+                        }
+                        data.setNames(names);
                     }
                 }
                 return data;
@@ -441,6 +480,127 @@ public class HkHttpParser {
         data.setUrl(url.split(";")[0]);
         data.setHeader(getHeaders(url));
         return data;
+    }
+
+    /**
+     * 某集在某条线路下的实际地址（逐线打包，列表路与详情路共用——毛病3(iv)）：
+     * 取 urls[线路]（越界回 urls[0]），该线路的请求头/字幕/分离音频/弹幕/
+     * 歌词随址打成 mini PlayData JSON；无附带字段时回裸址。本体自
+     * HkListActivity.expandedUrl 原样移入（2026-11-15），HkListActivity
+     * 保留同名委托口，详情路 toVod 展开与列表路自此同一打包口径。
+     */
+    public static String expandLineUrl(HkPlayData pd, String rawUrl, int line) {
+        if (pd == null) return rawUrl;
+        List<String> urls = pd.getUrls();
+        if (urls == null || urls.isEmpty()) return rawUrl;
+        String u = urls.get(line < urls.size() ? line : 0);
+        u = u == null ? "" : u.trim();
+        if (u.isEmpty()) return rawUrl;
+        List<String> kvs = new ArrayList<>();
+        List<Map<String, String>> headers = pd.getHeaders();
+        if (headers != null && line < headers.size() && headers.get(line) != null) {
+            for (Map.Entry<String, String> e : headers.get(line).entrySet()) {
+                String k = e.getKey() == null ? "" : e.getKey().trim();
+                String v = e.getValue() == null ? "" : e.getValue().trim();
+                if (!k.isEmpty() && !v.isEmpty()) kvs.add(k + "@" + v);
+            }
+        }
+        if (pd.getHeader() != null && line == 0) {
+            for (Map.Entry<String, String> e : pd.getHeader().entrySet()) {
+                String k = e.getKey() == null ? "" : e.getKey().trim();
+                String v = e.getValue() == null ? "" : e.getValue().trim();
+                if (!k.isEmpty() && !v.isEmpty()) kvs.add(k + "@" + v);
+            }
+        }
+        String subtitle = pd.getSubtitle() == null ? "" : pd.getSubtitle().trim();
+        String audio = "";
+        List<String> audioUrls = pd.getAudioUrls();
+        if (audioUrls != null && !audioUrls.isEmpty()) {
+            String a = audioUrls.get(line < audioUrls.size() ? line : 0);
+            audio = a == null ? "" : a.trim();
+        }
+        String danmu = pd.getDanmu() == null ? "" : pd.getDanmu().trim();
+        String lyric = pd.getLyric() == null ? "" : pd.getLyric().trim();
+        if (kvs.isEmpty() && subtitle.isEmpty() && audio.isEmpty() && danmu.isEmpty() && lyric.isEmpty()) return u;
+        try {
+            org.json.JSONObject mini = new org.json.JSONObject();
+            org.json.JSONArray mu = new org.json.JSONArray();
+            mu.put(u);
+            mini.put("urls", mu);
+            if (!kvs.isEmpty()) {
+                org.json.JSONArray mh = new org.json.JSONArray();
+                for (String kv : kvs) mh.put(kv);
+                mini.put("headers", mh);
+            }
+            if (!subtitle.isEmpty()) mini.put("subtitle", subtitle);
+            if (!danmu.isEmpty()) mini.put("danmu", danmu);
+            if (!lyric.isEmpty()) mini.put("lyric", lyric);
+            if (!audio.isEmpty()) {
+                org.json.JSONArray ma = new org.json.JSONArray();
+                ma.put(audio);
+                mini.put("audioUrls", ma);
+            }
+            return mini.toString();
+        } catch (Exception e) {
+            return u;
+        }
+    }
+
+    /** PlayData 的 String 面收敛（面②#6）：标量字段 url/danmu/lyric/subtitle、
+     * 串表 urls/names/audioUrls 的元素、header 与 headers 各 Map 的值，
+     * 非串一律按官 parseString 收敛成文本（复合→JSON 文本、数字→官词形、
+     * 布尔→"true"/"false"）；串与 null 原样不动，Map 键恒为 JSON 串不动。 */
+    private static void coercePlayDataObject(JsonObject obj) {
+        coercePlayStringField(obj, "url");
+        coercePlayStringField(obj, "danmu");
+        coercePlayStringField(obj, "lyric");
+        coercePlayStringField(obj, "subtitle");
+        coercePlayStringList(obj, "urls");
+        coercePlayStringList(obj, "names");
+        coercePlayStringList(obj, "audioUrls");
+        JsonElement header = obj.get("header");
+        if (header != null && header.isJsonObject()) coercePlayStringMapValues(header.getAsJsonObject());
+        JsonElement headers = obj.get("headers");
+        if (headers != null && headers.isJsonArray()) {
+            for (JsonElement h : headers.getAsJsonArray()) {
+                if (h != null && h.isJsonObject()) coercePlayStringMapValues(h.getAsJsonObject());
+            }
+        }
+    }
+
+    private static void coercePlayStringField(JsonObject obj, String key) {
+        if (!obj.has(key)) return;
+        JsonElement v = obj.get(key);
+        if (v == null || v.isJsonNull()) return;
+        if (v.isJsonPrimitive() && v.getAsJsonPrimitive().isString()) return;
+        String text = HkRuleManager.fastJsonValueText(v);
+        if (text != null) obj.addProperty(key, text);
+    }
+
+    private static void coercePlayStringList(JsonObject obj, String key) {
+        JsonElement v = obj.get(key);
+        if (v == null || !v.isJsonArray()) return;
+        JsonArray arr = v.getAsJsonArray();
+        for (int i = 0; i < arr.size(); i++) {
+            JsonElement e = arr.get(i);
+            if (e == null || e.isJsonNull()) continue;
+            if (e.isJsonPrimitive() && e.getAsJsonPrimitive().isString()) continue;
+            String text = HkRuleManager.fastJsonValueText(e);
+            if (text != null) arr.set(i, new JsonPrimitive(text));
+        }
+    }
+
+    /** 单个头表对象（header 本体或 headers 的一个元素）的全部值收敛。 */
+    private static void coercePlayStringMapValues(JsonObject mapObj) {
+        List<String> keys = new ArrayList<>();
+        for (Map.Entry<String, JsonElement> e : mapObj.entrySet()) keys.add(e.getKey());
+        for (String k : keys) {
+            JsonElement v = mapObj.get(k);
+            if (v == null || v.isJsonNull()) continue;
+            if (v.isJsonPrimitive() && v.getAsJsonPrimitive().isString()) continue;
+            String text = HkRuleManager.fastJsonValueText(v);
+            if (text != null) mapObj.addProperty(k, text);
+        }
     }
 
     public static String getPlayUrlWithHeader(String url) {
@@ -467,10 +627,14 @@ public class HkHttpParser {
                 options.put("headers", headers);
                 options.put("timeout", 10000);
                 final String noScheme = HkParserKit.replaceOnceIgnoreCase(decodedUrl, "webview://", "");
-                Executors.newSingleThreadExecutor().execute(() -> {
+                WEBVIEW_EXECUTOR.execute(() -> {
                     try {
                         String code = bridge.fetchCodeByWebView(noScheme, options);
-                        callBack.onSuccess(decodedUrl, code);
+                        // 官 HttpParser lambda$get$0：onSuccess 回的是剥掉
+                        // webview:// 前缀的地址（与 fetchCodeByWebView 入参
+                        // 同一串）；旧形回带前缀的 decodedUrl，下游 storeUrl/
+                        // findList 拿到的页址与官不一致，本次订正。
+                        callBack.onSuccess(noScheme, code);
                     } catch (Exception e) {
                         Log.e(TAG, "webview get", e);
                         callBack.onFailure(500, e.toString());

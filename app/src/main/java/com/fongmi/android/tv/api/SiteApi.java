@@ -475,9 +475,11 @@ public class SiteApi {
             fallbackResult.setFlag(flag);
             return fallbackResult;
         }
-        // P2 多线路：按 (规则名,剧集) 记忆的线路下标取线（默认首线），
-        // 该线路的地址+请求头按下标取、不跨线路合并（8.83 getPlayData/getHeaders 语义）
-        int line = HkRouter.lineIndex(title, id);
+        // P2 多线路：默认首线。该线路的地址+请求头按下标取、不跨线路合并
+        // （8.83 getPlayData/getHeaders 语义）。原 HkRouter.lineIndex 记忆表
+        // 全树无写方（rememberLine 无调用），星辰 1.4.137 已删除该死机制，
+        // 本处随上游收口为恒首线，行为与此前一致。
+        int line = 0;
         Result result = new Result();
         result.setUrl(play.getUrl(line));
         result.setParse(0);

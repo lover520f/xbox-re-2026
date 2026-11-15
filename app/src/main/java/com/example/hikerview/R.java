@@ -43,6 +43,8 @@ public final class R {
         public static final int item_history_pic = com.fongmi.android.tv.R.layout.item_history_pic;
         public static final int item_history_pic_vertical = com.fongmi.android.tv.R.layout.item_history_pic_vertical;
         public static final int xpopup_image_viewer_popup_view = com.fongmi.android.tv.R.layout.xpopup_image_viewer_popup_view;
+        public static final int pop_import_rules = com.fongmi.android.tv.R.layout.pop_import_rules;
+        public static final int pop_import_sub_check_popup = com.fongmi.android.tv.R.layout.pop_import_sub_check_popup;
     }
 
     public static final class id {
@@ -65,6 +67,9 @@ public final class R {
         public static final int color6_bg = com.fongmi.android.tv.R.id.color6_bg;
         public static final int color7_bg = com.fongmi.android.tv.R.id.color7_bg;
         public static final int color8_bg = com.fongmi.android.tv.R.id.color8_bg;
+        public static final int checkbox = com.fongmi.android.tv.R.id.checkbox;
+        public static final int update_checkbox = com.fongmi.android.tv.R.id.update_checkbox;
+        public static final int showDetailView = com.fongmi.android.tv.R.id.showDetailView;
         public static final int code = com.fongmi.android.tv.R.id.code;
         public static final int btn_ok = com.fongmi.android.tv.R.id.btn_ok;
         public static final int btn_cancel = com.fongmi.android.tv.R.id.btn_cancel;
