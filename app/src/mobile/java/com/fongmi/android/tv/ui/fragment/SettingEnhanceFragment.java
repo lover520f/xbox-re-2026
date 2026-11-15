@@ -13,6 +13,7 @@ import androidx.viewbinding.ViewBinding;
 
 import com.fongmi.android.tv.lab.LabActivity;
 import com.fongmi.android.tv.api.hk.HkConfig;
+import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.playback.ViewingRecordSyncStore;
 import com.fongmi.android.tv.remote.RemoteStore;
@@ -112,6 +113,10 @@ public class SettingEnhanceFragment extends BaseFragment {
         mBinding.hikerNav.setOnClickListener(view -> {
             HkConfig.get().setNavEntry(!HkConfig.get().getNavEntry());
             setText();
+            // 与实验室同口径（AGENTS.md §28）：改完开关发 ConfigEvent(COMMON)，
+            // 首页当场 setNavigation() 重算。本开关在 HomeActivity 内的 Fragment 里，
+            // 不发事件则 Activity 不经历 onResume、可见性要等重启才变。
+            ConfigEvent.common();
         });
         mBinding.loginState.setOnClickListener(view -> LoginStateLearnDialog.show(this, this::setText));
         mBinding.oneKeySync.setOnClickListener(v -> OneKeySyncDialog.create().show(requireActivity()));
