@@ -1,0 +1,481 @@
+name: oktvpro Release
+
+# oktvpro 专用构建程序：以 xbox-re main 分支 android-release.yml 的安装包口径为准
+# （标签规则、未签名构建、收集命名、发布方式与更新清单），身份换成 oktvpro 自己的：
+# 包名 com.fongmi.android.oktv、签名 CN=oktvpro、仅签 v2（liam 定）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag, blank = v<versionName>-yyyyMMddHHmm or v<versionName>-beta-yyyyMMddHHmm"
+        required: false
+        type: string
+      release_channel:
+        description: "Release channel, auto = stable except on fongmi-sync"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - stable
+          - beta
+      release_notes:
+        description: "Release notes, use \\n for Markdown newlines"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        default: false
+        type: boolean
+      apk_variants:
+        description: "APK variants: all (four APKs) or comma separated mobile-arm64_v8a / mobile-armeabi_v7a / leanback-arm64_v8a / leanback-armeabi_v7a"
+        required: false
+        default: all
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -1)"
+          VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/build.gradle | head -1)"
+          CHANNEL="${{ inputs.release_channel }}"
+          if [ "$CHANNEL" = "auto" ] || [ -z "$CHANNEL" ]; then
+            if [ "${{ github.ref_name }}" = "fongmi-sync" ]; then
+              CHANNEL="beta"
+            else
+              CHANNEL="stable"
+            fi
+          fi
+          if [ "$CHANNEL" = "beta" ]; then
+            APK_SUFFIX="-beta"
+            TAG_PATTERN="^v${VERSION_NAME}-beta-[0-9]{12}$"
+            TAG_DEFAULT="v${VERSION_NAME}-beta-$(date +%Y%m%d%H%M)"
+            TAG_EXPECT="v${VERSION_NAME}-beta-yyyyMMddHHmm"
+          else
+            APK_SUFFIX=""
+            TAG_PATTERN="^v${VERSION_NAME}-[0-9]{12}$"
+            TAG_DEFAULT="v${VERSION_NAME}-$(date +%Y%m%d%H%M)"
+            TAG_EXPECT="v${VERSION_NAME}-yyyyMMddHHmm"
+          fi
+          TAG="${{ inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="$TAG_DEFAULT"
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq "$TAG_PATTERN"; then
+            echo "::error title=Invalid release tag::Expected $TAG_EXPECT, got: $TAG"
+            exit 1
+          fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error title=Release tag exists::$TAG already exists"
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "title=${TAG#v}"
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "short_sha=$(git rev-parse --short=7 HEAD)"
+            echo "channel=$CHANNEL"
+            echo "apk_suffix=$APK_SUFFIX"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure release signing
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          KS_BASE64="${RELEASE_KEYSTORE_BASE64:-$KEYSTORE_BASE64}"
+          STORE_PASSWORD="${RELEASE_STORE_PASSWORD}"
+          ALIAS="${RELEASE_KEY_ALIAS:-$KEY_ALIAS}"
+          KEY_PASS="${RELEASE_KEY_PASSWORD:-$STORE_PASSWORD}"
+          if [ -z "$KS_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$ALIAS" ]; then
+            echo "::error title=Release signing not configured::Configure RELEASE_KEYSTORE_BASE64, RELEASE_KEY_ALIAS and RELEASE_STORE_PASSWORD in repository secrets. Never publish a debug-signed release."
+            exit 1
+          fi
+          mkdir -p app/signing
+          printf '%s' "$KS_BASE64" | base64 --decode > app/signing/release.jks
+          {
+            echo "storeFile=$GITHUB_WORKSPACE/app/signing/release.jks"
+            echo "keyAlias=$ALIAS"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASS"
+          } > local.properties
+          # 只在 CI 工作副本里关闭 Gradle 签名，产出完全未签名的 APK，
+          # 之后由 apksigner 只签 v2（不改仓库里的 build.gradle）。
+          sed -i 's|signingConfig = hasReleaseSigning ? signingConfigs.release : signingConfigs.debug|signingConfig = null|' app/build.gradle
+          grep -q 'signingConfig = null' app/build.gradle || {
+            echo "::error title=Unsigned build not configured::Failed to disable Gradle signing in app/build.gradle"
+            exit 1
+          }
+          echo "Release signing configured (Gradle outputs unsigned APKs; apksigner signs v2 only)"
+
+      - name: Build release APKs
+        id: build_apks
+        env:
+          WEBHTV_RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          WEBHTV_APK_SUFFIX: ${{ steps.meta.outputs.apk_suffix }}
+          APK_VARIANTS: ${{ inputs.apk_variants }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          rm -rf Release/apk
+          VARIANTS="${APK_VARIANTS:-all}"
+          case "$VARIANTS" in
+            all|ALL|"")
+              TASKS=":app:assembleMobileArm64_v8aRelease :app:assembleMobileArmeabi_v7aRelease :app:assembleLeanbackArm64_v8aRelease :app:assembleLeanbackArmeabi_v7aRelease"
+              EXPECTED=4
+              ;;
+            *)
+              TASKS=""
+              EXPECTED=0
+              IFS=',' read -ra LIST <<< "$VARIANTS"
+              for v in "${LIST[@]}"; do
+                v="$(printf '%s' "$v" | tr -d '[:space:]')"
+                [ -z "$v" ] && continue
+                case "$v" in
+                  mobile-arm64_v8a)      t=":app:assembleMobileArm64_v8aRelease" ;;
+                  mobile-armeabi_v7a)    t=":app:assembleMobileArmeabi_v7aRelease" ;;
+                  leanback-arm64_v8a)    t=":app:assembleLeanbackArm64_v8aRelease" ;;
+                  leanback-armeabi_v7a)  t=":app:assembleLeanbackArmeabi_v7aRelease" ;;
+                  *) echo "::error title=Unknown APK variant::$v"; exit 1 ;;
+                esac
+                TASKS="$TASKS $t"
+                EXPECTED=$((EXPECTED+1))
+              done
+              ;;
+          esac
+          [ "$EXPECTED" -ge 1 ] || { echo "::error title=No APK variant selected::apk_variants resolved to zero variants"; exit 1; }
+          echo "expected_apk_count=$EXPECTED" >> "$GITHUB_OUTPUT"
+          echo "Building $EXPECTED APK(s):$TASKS"
+          ./gradlew $TASKS --no-daemon 2>&1 | tee /tmp/gradle-build.log
+
+      - name: Report build failure
+        if: failure() && steps.build_apks.outcome == 'failure'
+        run: |
+          echo "::group::Gradle build failure detail"
+          if [ -f /tmp/gradle-build.log ]; then
+            grep -nE "error:|^e: |FAILED|What went wrong|Execution failed|Caused by:|AAPT|Android resource linking failed|cannot find symbol|package .* does not exist|Duplicate resources|Compilation failed|Unresolved reference|resource .* not found" /tmp/gradle-build.log | head -60 | while IFS= read -r l; do echo "::error::$l"; done
+            echo "---- last 80 lines ----"
+            tail -80 /tmp/gradle-build.log
+          fi
+          echo "::endgroup::"
+
+      - name: Collect artifacts
+        run: |
+          rm -rf dist
+          mkdir -p dist
+          # 未签名产物可能带 -unsigned 后缀，统一成规范文件名，避免资产名漂移
+          for f in Release/apk/*.apk; do
+            b="$(basename "$f" .apk)"
+            b="${b%-unsigned}"
+            cp "$f" "dist/$b.apk"
+          done
+          ls -lh dist/
+
+      - name: Sign APKs (v2 only)
+        env:
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BT_DIR="$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          APKSIGNER="$BT_DIR/apksigner"
+          ALIAS="${RELEASE_KEY_ALIAS:-$KEY_ALIAS}"
+          STORE_PASS="${RELEASE_STORE_PASSWORD}"
+          KEY_PASS="${RELEASE_KEY_PASSWORD:-$RELEASE_STORE_PASSWORD}"
+          for apk in dist/*.apk; do
+            echo "== signing $apk with v2 only"
+            # 清掉第三方 jar 自带的旧 META-INF 签名条目，避免校验口径混乱
+            LEGACY="$(unzip -Z1 "$apk" | grep -iE '^META-INF/.*\.(SF|RSA|DSA|EC)$|^META-INF/MANIFEST\.MF$' || true)"
+            if [ -n "$LEGACY" ]; then
+              echo "  removing stale JAR signature entries:"
+              echo "$LEGACY" | sed 's/^/    /'
+              while IFS= read -r entry; do
+                [ -z "$entry" ] || zip -d -q "$apk" "$entry" || true
+              done <<< "$LEGACY"
+            fi
+            PRE="$("$APKSIGNER" verify --min-sdk-version 21 --verbose "$apk" 2>&1 || true)"
+            if echo "$PRE" | grep -qi "verified using"; then
+              echo "::error title=APK already signed::$apk already carries signatures; unsigned build is required"
+              exit 1
+            fi
+            "$APKSIGNER" sign \
+              --ks app/signing/release.jks \
+              --ks-key-alias "$ALIAS" \
+              --ks-pass "pass:$STORE_PASS" \
+              --key-pass "pass:$KEY_PASS" \
+              --min-sdk-version 21 \
+              --v1-signing-enabled false \
+              --v2-signing-enabled true \
+              --v3-signing-enabled false \
+              --out "${apk}.signed" "$apk"
+            mv "${apk}.signed" "$apk"
+            VERBOSE="$("$APKSIGNER" verify --min-sdk-version 21 --verbose "$apk" 2>&1 || true)"
+            echo "$(echo "$VERBOSE" | tr '\n' ' ')"
+            if ! echo "$VERBOSE" | grep -qi "v2 scheme.*: true"; then
+              echo "::error title=v2 signing failed::$(echo "$VERBOSE" | tr '\n' ' ')"
+              exit 1
+            fi
+          done
+          echo "v2 signing completed for all APKs"
+
+      - name: Verify APK signatures and package identity
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BT_DIR="$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          APKSIGNER="$BT_DIR/apksigner"
+          AAPT2="$BT_DIR/aapt2"
+          test -x "$APKSIGNER" && test -x "$AAPT2"
+          EXPECTED_DIGEST="37551e5b7fe239a7be7ef96ec3a13b2252ea1e60d67d430f8e797a79e8d87788"
+          count=0
+          for apk in dist/*.apk; do
+            echo "== $apk"
+            PKG="$("$AAPT2" dump packagename "$apk")"
+            echo "  package: $PKG"
+            if [ "$PKG" != "com.fongmi.android.oktv" ]; then
+              echo "::error title=Wrong applicationId::$PKG"
+              exit 1
+            fi
+            CERTS="$("$APKSIGNER" verify --print-certs "$apk" 2>&1)"
+            echo "$CERTS"
+            VERBOSE="$("$APKSIGNER" verify --min-sdk-version 21 --verbose "$apk" 2>&1)"
+            if ! echo "$VERBOSE" | grep -qi "v2 scheme.*: true"; then
+              echo "::error title=V2 signature missing::$(echo "$VERBOSE" | tr '\n' ' ')"
+              exit 1
+            fi
+            OTHER_WARN="$(echo "$VERBOSE" | grep -i 'WARNING' | grep -viE 'not protected by signature' || true)"
+            if [ -n "$OTHER_WARN" ]; then
+              echo "::error title=apksigner warning::$(echo "$OTHER_WARN" | tr '\n' ' ')"
+              exit 1
+            fi
+            if echo "$CERTS" | grep -qi "Android Debug"; then
+              echo "::error title=Debug-signed APK::Refusing to publish a debug-signed release."
+              exit 1
+            fi
+            if ! echo "$CERTS" | grep -q "CN=oktvpro"; then
+              echo "::error title=Unexpected signer::Release keystore was not used."
+              exit 1
+            fi
+            DIGEST="$(echo "$CERTS" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d '[:space:]')"
+            if [ "$DIGEST" != "$EXPECTED_DIGEST" ]; then
+              echo "::error title=Unexpected certificate digest::$DIGEST"
+              exit 1
+            fi
+            count=$((count+1))
+          done
+          EXPECTED="${{ steps.build_apks.outputs.expected_apk_count }}"
+          [ -n "$EXPECTED" ] || EXPECTED=4
+          test "$count" -eq "$EXPECTED" || { echo "::error title=APK count::Expected $EXPECTED APKs, got $count"; exit 1; }
+          echo "Verified $count v2-signed APKs with the oktvpro applicationId"
+          # 可下载的自检报告：用户能拿证书指纹 / 签名方案直接对照，不必依赖 CI 自述
+          {
+            echo "oktvpro 签名自检报告"
+            echo "tag: ${{ steps.meta.outputs.tag }}"
+            echo "commit: $GITHUB_SHA"
+            echo "SHA256 证书指纹: 37:55:1E:5B:7F:E2:39:A7:BE:7E:F9:6E:C3:A1:3B:22:52:EA:1E:60:D6:7D:43:0F:8E:79:7A:79:E8:D8:77:88"
+            echo ""
+            for apk in dist/*.apk; do
+              echo "=== $(basename "$apk") ==="
+              echo "sha256: $(sha256sum "$apk" | cut -d' ' -f1)"
+              echo "package: $("$AAPT2" dump packagename "$apk")"
+              echo "apksigner verify:"
+              "$APKSIGNER" verify --min-sdk-version 21 --verbose "$apk" 2>&1 | sed 's/^/  /'
+              echo "证书:"
+              "$APKSIGNER" verify --print-certs "$apk" 2>&1 | sed 's/^/  /'
+              echo ""
+            done
+          } > dist/signature-report.txt
+          echo "signature-report.txt generated"
+
+      - name: Prepare release notes input
+        id: release_notes
+        env:
+          RELEASE_NOTES_RAW: ${{ inputs.release_notes }}
+        run: |
+          python3 - <<'PY'
+          import os
+
+          raw = os.environ.get("RELEASE_NOTES_RAW", "").strip()
+          notes = (
+              raw
+              .replace("\\r\\n", "\n")
+              .replace("\\n", "\n")
+              .replace("\\t", "\t")
+              .replace('\\"', '"')
+              .replace("\\'", "'")
+          )
+          delimiter = "RELEASE_NOTES_EOF"
+          while delimiter in notes:
+              delimiter += "_"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"has_notes={'true' if notes else 'false'}\n")
+              fh.write(f"notes<<{delimiter}\n")
+              fh.write(notes)
+              if notes and not notes.endswith("\n"):
+                  fh.write("\n")
+              fh.write(f"{delimiter}\n")
+          PY
+
+      - name: Generate update manifests
+        env:
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
+          GITHUB_RELEASE_DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import hashlib
+          import json
+          import os
+
+          tag = "${{ steps.meta.outputs.tag }}"
+          notes = os.environ.get("RELEASE_NOTES", "").strip()
+          release_download_base = os.environ["GITHUB_RELEASE_DOWNLOAD_BASE"]
+          for apk in glob.glob("dist/*.apk"):
+              base = os.path.splitext(os.path.basename(apk))[0]
+              with open(apk, "rb") as fh:
+                  content = fh.read()
+              data = {
+                  "name": tag,
+                  "versionName": "${{ steps.meta.outputs.version_name }}",
+                  "desc": f"{tag} - ${{ steps.meta.outputs.short_sha }}",
+                  "channel": "${{ steps.meta.outputs.channel }}",
+                  "code": int("${{ steps.meta.outputs.version_code }}"),
+                  "apk": f"{release_download_base}/{base}.apk",
+                  "size": len(content),
+                  "sha256": hashlib.sha256(content).hexdigest(),
+                  "downloads": {
+                      "github": {"url": f"{release_download_base}/{base}.apk"},
+                  },
+              }
+              if notes:
+                  data["notes"] = notes
+              with open(f"dist/{base}.json", "w", encoding="utf-8") as fh:
+                  json.dump(data, fh, ensure_ascii=False, indent=2)
+                  fh.write("\n")
+          PY
+          ls -lh dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
+        run: |
+          ls -lh dist/
+          python3 - <<'PY'
+          import glob, json, os, urllib.error, urllib.parse, urllib.request
+
+          tag = "${{ steps.meta.outputs.tag }}"
+          title = "${{ steps.meta.outputs.title }}"
+          notes = os.environ.get("RELEASE_NOTES", "").strip() or "手动触发 GitHub Actions 构建发布。"
+          prerelease = ("${{ inputs.prerelease }}" == "true") or ("${{ steps.meta.outputs.channel }}" == "beta")
+          token = os.environ["GH_TOKEN"]
+          repo = "${{ github.repository }}"
+          api = "https://api.github.com"
+          base = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                  "User-Agent": "oktvpro-release", "X-GitHub-Api-Version": "2022-11-28"}
+
+          def call(method, url, data=None, raw=None, ctype="application/json"):
+              headers = dict(base)
+              headers["Content-Type"] = ctype
+              body = raw if raw is not None else (json.dumps(data).encode() if data is not None else None)
+              req = urllib.request.Request(url, method=method, data=body, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=180) as resp:
+                      text = resp.read().decode()
+                      return resp.status, (json.loads(text) if text.strip() else {})
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode()
+
+          status, body = call("GET", api + "/repos/" + repo + "/releases/tags/" + tag)
+          if status == 200:
+              rel = body
+              print("Release already exists, reuse:", tag)
+          else:
+              status, rel = call("POST", api + "/repos/" + repo + "/releases", {
+                  "tag_name": tag, "target_commitish": os.environ["GITHUB_SHA"],
+                  "name": title, "body": notes, "draft": False, "prerelease": prerelease})
+              if status not in (200, 201):
+                  print("::error title=Create release failed::HTTP %s %s" % (status, rel))
+                  raise SystemExit(1)
+              print("Release created:", tag)
+          upload_url = rel["upload_url"].split("{")[0]
+          assets = sorted(set(glob.glob("dist/*.apk") + glob.glob("dist/*.json") + glob.glob("dist/*.txt")))
+          print("assets:", assets)
+          if not assets:
+              raise SystemExit("::error title=No release assets::dist is empty")
+          for path in assets:
+              name = os.path.basename(path)
+              with open(path, "rb") as f:
+                  data = f.read()
+              url = upload_url + "?name=" + urllib.parse.quote(name)
+              status, body = call("POST", url, raw=data, ctype="application/octet-stream")
+              if status in (200, 201):
+                  print("uploaded:", name)
+              elif status == 422 and "already_exists" in str(body):
+                  print("asset exists, skip:", name)
+              else:
+                  print("::error title=Upload asset failed::%s HTTP %s %s" % (name, status, body))
+                  raise SystemExit(1)
+          print("Release ready:", tag)
+          PY
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oktvpro-${{ steps.meta.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
